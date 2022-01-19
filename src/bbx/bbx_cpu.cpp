@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 
-#include "bbx.h"
+#include "../../include/bbx.h"
 
 template<typename T>
 inline T clamp(T x, T a, T b) {

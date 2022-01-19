@@ -4,10 +4,10 @@
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
-#include "utils/checks.h"
-#include "utils/cuda.cuh"
-#include "utils/common.h"
-#include "roi_sampling.h"
+#include "../../include/utils/checks.h"
+#include "../../include/utils/cuda.cuh"
+#include "../../include/utils/common.h"
+#include "../../include/roi_sampling.h"
 
 
 template<typename scalar_t, typename coord_t, typename index_t, typename Sampler>

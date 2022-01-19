@@ -233,6 +233,7 @@ class BEVNuScenesDataset(data.Dataset):
         # Get the RGB file names
         img_file = [os.path.join(self.nuscenes_root_dir, self._img_map[camera]["{}.png".format(img_desc['id'])])
                     for camera in self.rgb_cameras]
+        print("dataset.py load item: ", img_file)
         if all([(not os.path.exists(img)) for img in img_file]):
             raise IOError("RGB image not found! Name: {}".format(img_desc['id']))
 

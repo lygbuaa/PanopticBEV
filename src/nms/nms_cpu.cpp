@@ -4,8 +4,8 @@
 
 #include <ATen/ATen.h>
 
-#include "nms.h"
-#include "utils/common.h"
+#include "../../include/nms.h"
+#include "../../include/utils/common.h"
 
 template<typename T>
 inline T area(T tl0, T tl1, T br0, T br1) {

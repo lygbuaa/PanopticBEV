@@ -3,8 +3,8 @@
 #include <torch/extension.h>
 #include <torch/torch.h>
 
-#include "utils/checks.h"
-#include "roi_sampling.h"
+#include "../../include/utils/checks.h"
+#include "../../include/roi_sampling.h"
 
 std::tuple<at::Tensor, at::Tensor> roi_sampling_forward(
     const at::Tensor& x, const at::Tensor& bbx, const at::Tensor& idx, std::tuple<int, int> out_size,

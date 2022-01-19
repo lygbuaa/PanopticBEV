@@ -1,7 +1,7 @@
 #include <torch/extension.h>
 
-#include "bbx.h"
-#include "utils/checks.h"
+#include "../../include/bbx.h"
+#include "../../include/utils/checks.h"
 #include <torch/torch.h>
 
 at::Tensor extract_boxes(const at::Tensor& mask, int n_instances){

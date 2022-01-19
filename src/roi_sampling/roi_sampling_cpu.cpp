@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 
-#include "roi_sampling.h"
+#include "../../include/roi_sampling.h"
 
 template<typename scalar_t, typename coord_t, typename Sampler>
 void roi_sampling_forward_impl(

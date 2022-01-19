@@ -1,7 +1,8 @@
 import torch.nn as nn
 from torch.nn import functional as F
 import torch
-import kornia
+# import kornia
+from kornia.geometry.transform import warp_perspective
 from inplace_abn import ABN
 
 from panoptic_bev.utils.transformer import get_init_homography
@@ -154,7 +155,7 @@ class FlatTransformer(nn.Module):
                                               self.img_scale, self.out_img_size_reverse).view(-1, 3, 3).to(feat.device)
             theta_ipm_list.append(theta_ipm_i)
         theta_ipm = torch.cat(theta_ipm_list, dim=0)
-        feat_bev_ipm = kornia.warp_perspective(feat, theta_ipm, (int(self.Z_out), int(self.W_out)))
+        feat_bev_ipm = warp_perspective(feat, theta_ipm, (int(self.Z_out), int(self.W_out)))
         feat_bev_ipm = torch.rot90(feat_bev_ipm, k=2, dims=[2, 3])
 
         # Find the regions where IPM goes wrong and apply the ECN to those regions
@@ -163,7 +164,7 @@ class FlatTransformer(nn.Module):
 
         # Convert the incorrect mask back into the FV and use it to get the erroneous features in the FV
         ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
-        ipm_incorrect_fv = kornia.warp_perspective(ipm_incorrect, torch.inverse(theta_ipm), (feat.shape[2], feat.shape[3]))
+        ipm_incorrect_fv = warp_perspective(ipm_incorrect, torch.inverse(theta_ipm), (feat.shape[2], feat.shape[3]))
         feat_ecm_fv = (feat * ipm_incorrect_fv)
 
         # Add the regions that are ignored by the IPM algorithm --> Regions above the principal point.

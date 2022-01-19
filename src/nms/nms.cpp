@@ -1,7 +1,7 @@
 #include <torch/extension.h>
 
-#include "nms.h"
-#include "utils/checks.h"
+#include "../../include/nms.h"
+#include "../../include/utils/checks.h"
 #include <torch/torch.h>
 
 at::Tensor nms(const at::Tensor& bbx, const at::Tensor& scores, float threshold, int n_max) {

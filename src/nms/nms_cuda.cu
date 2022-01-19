@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAStream.h>
 
-#include "nms.h"
-#include "utils/common.h"
-#include "utils/cuda.cuh"
+#include "../../include/nms.h"
+#include "../../include/utils/common.h"
+#include "../../include/utils/cuda.cuh"
 
 template<typename T> struct VectType;
 template<> struct VectType<float> {

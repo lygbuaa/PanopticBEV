@@ -2,8 +2,8 @@
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
-#include "bbx.h"
-#include "utils/cuda.cuh"
+#include "../../include/bbx.h"
+#include "../../include/utils/cuda.cuh"
 
 template<typename T>
 __device__ inline T clamp(T x, T a, T b) {
