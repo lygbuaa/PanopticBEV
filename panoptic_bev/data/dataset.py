@@ -7,7 +7,7 @@ import torch.utils.data as data
 import umsgpack
 import json
 from panoptic_bev.data.transform import *
-
+from panoptic_bev.utils import logging
 
 class BEVKitti360Dataset(data.Dataset):
     _IMG_DIR = "img"
@@ -203,6 +203,7 @@ class BEVNuScenesDataset(data.Dataset):
 
     # Load the train or the validation split
     def _load_split(self):
+        logger = logging.get_logger()
         with open(os.path.join(self.seam_root_dir, BEVNuScenesDataset._METADATA_FILE), "rb") as fid:
             metadata = umsgpack.unpack(fid, encoding="utf-8")
 
@@ -224,16 +225,17 @@ class BEVNuScenesDataset(data.Dataset):
 
         meta = metadata["meta"]
         images = [img_desc for img_desc in metadata["images"] if img_desc["id"] in lst]
+        logger.debug("load_split, bev_msk shape: {}, images shape: {}".format(len(bev_msk_frames), len(images)))
 
         return meta, images, img_map
 
     def _load_item(self, item_idx):
+        logger = logging.get_logger()
         img_desc = self._images[item_idx]
 
         # Get the RGB file names
         img_file = [os.path.join(self.nuscenes_root_dir, self._img_map[camera]["{}.png".format(img_desc['id'])])
                     for camera in self.rgb_cameras]
-        print("dataset.py load item: ", img_file)
         if all([(not os.path.exists(img)) for img in img_file]):
             raise IOError("RGB image not found! Name: {}".format(img_desc['id']))
 
@@ -260,6 +262,10 @@ class BEVNuScenesDataset(data.Dataset):
         cat = img_desc["cat"]
         iscrowd = img_desc["iscrowd"]
         calib = img_desc['cam_intrinsic']
+
+        # logger.debug(("dataset.py load img_file: {}, bev_msk_file: {}, vf_msk_file: {}, weights_msk_file: {}").format(img_file, bev_msk_file, vf_msk_file, weights_msk_file))
+        logger.debug("dataset.py img_desc: {}".format(img_desc))
+
         return img, bev_msk, vf_msk, weights_msk_combined, cat, iscrowd, calib, img_desc["id"]
 
     @property

@@ -38,6 +38,8 @@ from panoptic_bev.utils.snapshot import resume_from_snapshot, pre_train_from_sna
 from panoptic_bev.utils.sequence import pad_packed_images
 from panoptic_bev.utils.panoptic import compute_panoptic_test_metrics, panoptic_post_processing, get_panoptic_scores
 
+from panoptic_bev.utils.BevVisualizer import BevVisualizer
+# from thop import profile
 
 parser = argparse.ArgumentParser(description="Panoptic BEV Evaluation Script")
 parser.add_argument("--local_rank", required=True, type=int)
@@ -85,10 +87,10 @@ def log_scores(label, scores):
 
 
 def make_config(args, config_file):
-    log_info("Loading configuration from %s", config_file, debug=args.debug)
+    log_info("Loading configuration from %s", config_file)
     conf = load_config(config_file)
 
-    log_info("\n%s", config_to_string(conf), debug=args.debug)
+    log_info("\n%s", config_to_string(conf))
     return conf
 
 
@@ -103,6 +105,7 @@ def create_run_directories(args, rank):
         raise RuntimeError("Invalid choice. --mode must be either 'train' or 'test'")
     saved_models_dir = os.path.join(run_dir, "saved_models")
     log_dir = os.path.join(run_dir, "logs")
+    vis_dir = os.path.join(run_dir, "vis")
     config_file = os.path.join(run_dir, args.config)
 
     # Create the directory
@@ -115,13 +118,14 @@ def create_run_directories(args, rank):
         os.mkdir(run_dir)
         os.mkdir(saved_models_dir)
         os.mkdir(log_dir)
+        os.mkdir(vis_dir)
 
     # Copy the config file into the folder
     config_path = os.path.join(experiment_dir, "config", args.config)
     if rank == 0:
         shutil.copyfile(config_path, config_file)
 
-    return log_dir, saved_models_dir, config_path
+    return log_dir, saved_models_dir, config_path, vis_dir
 
 
 def make_dataloader(args, config, rank, world_size):
@@ -355,6 +359,9 @@ def log_iter(mode, meters, time_meters, results, metrics, batch=True, **kwargs):
 
 
 def test(model, dataloader, **varargs):
+    global g_bev_visualizer
+
+    logger = logging.get_logger()
     model.eval()
 
     if not varargs['debug']:
@@ -394,13 +401,18 @@ def test(model, dataloader, **varargs):
     panoptic_buffer = torch.zeros(4, num_classes, dtype=torch.double)
     po_conf_mat = torch.zeros(256, 256, dtype=torch.double)
     sem_conf_mat = torch.zeros(num_classes, num_classes, dtype=torch.double)
+    logger.debug("num_stuff: {}, num_thing: {}, panoptic_buffer: {}, po_conf_mat: {}, sem_conf_mat: {}".format(num_stuff, num_thing, panoptic_buffer.shape, po_conf_mat.shape, sem_conf_mat.shape))
 
     data_time = time.time()
 
     for it, sample in enumerate(dataloader):
+        # eval with front-100 images
+        if it > 100:
+            break
         batch_sizes = [m.shape[-2:] for m in sample['bev_msk']]
         original_sizes = sample['size']
         idxs = sample['idx']
+        do_loss=False
         with torch.no_grad():
             sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
             sample['calib'], _ = pad_packed_images(sample['calib'])
@@ -408,12 +420,21 @@ def test(model, dataloader, **varargs):
             time_meters['data_time'].update(torch.tensor(time.time() - data_time))
             batch_time = time.time()
 
+            logger.debug(("eval idx: {}, batch_sizes: {}, original_sizes: {}, calib: {}").format(idxs, batch_sizes, original_sizes, sample['calib']))
             # Run network
-            losses, results, stats = model(**sample, do_loss=True, do_prediction=True)
+            losses, results, stats = model(**sample, do_loss=do_loss, do_prediction=True)
+            # logger.debug("model results: {}".format(results))
+            # inputs = (sample["img"], sample["bev_msk"], sample["front_msk"], sample["weights_msk"], sample["cat"], sample["iscrowd"], sample["bbx"], sample["calib"], False, True)
+            # macs, params = profile(model, inputs)
+            # logger.info("thop profile, macs: {}, params: {}".format(macs, params))
 
             if not varargs['debug']:
                 distributed.barrier()
 
+            g_bev_visualizer.plot_bev(sample, it, results)
+
+            if not do_loss:
+                continue
             losses = OrderedDict((k, v.mean()) for k, v in losses.items())
             losses["loss"] = sum(loss_weights[loss_name] * losses[loss_name] for loss_name in losses.keys())
 
@@ -490,7 +511,7 @@ def test(model, dataloader, **varargs):
 
     # Log results
     log_info("Evaluation done", debug=varargs['debug'])
-    if varargs["summary"] is not None:
+    if varargs["summary"] is not None and do_loss:
         log_iter("val", test_meters, time_meters, None, test_metrics, batch=False, summary=varargs['summary'],
                  global_step=varargs['global_step'], curr_iter=len(dataloader), num_iters=len(dataloader),
                  epoch=varargs['epoch'], num_epochs=varargs['num_epochs'], lr=None)
@@ -502,6 +523,7 @@ def test(model, dataloader, **varargs):
 
 
 def main(args):
+    global g_bev_visualizer
     if not args.debug:
         # Initialize multi-processing
         distributed.init_process_group(backend='nccl', init_method='env://')
@@ -515,12 +537,14 @@ def main(args):
 
     # Create directories
     if not args.debug:
-        log_dir, saved_models_dir, config_file = create_run_directories(args, rank)
+        log_dir, saved_models_dir, config_file, vis_dir = create_run_directories(args, rank)
     else:
         config_file = os.path.join(args.project_root_dir, "experiments", "config", args.config)
 
     # Load configuration
     config = make_config(args, config_file)
+
+    g_bev_visualizer = BevVisualizer(config, vis_dir)
 
     # Initialize logging only for rank 0
     if not args.debug and rank == 0:

@@ -2,6 +2,8 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 from panoptic_bev.utils.sequence import pad_packed_images
+from panoptic_bev.utils import logging
+
 
 NETWORK_INPUTS = ["img", "bev_msk", "front_msk", "weights_msk", "cat", "iscrowd", "bbx", "calib"]
 
@@ -131,9 +133,12 @@ class PanopticBevNet(nn.Module):
 
     def forward(self, img, bev_msk=None, front_msk=None, weights_msk=None, cat=None, iscrowd=None, bbx=None, calib=None,
                 do_loss=False, do_prediction=False):
+        logger = logging.get_logger()
         result = OrderedDict()
         loss = OrderedDict()
         stats = OrderedDict()
+        if (front_msk is not None) and (bev_msk is not None) and (weights_msk is not None):
+            logger.debug("panoptic_bev input, img: {}, bev_msk: {}, front_msk: {}, weights_msk: {}, cat:{}, iscrowd: {}, bbx: {}, calib: {}, do_loss: {}, do_prediction: {}".format(img[0].shape, bev_msk[0].shape, front_msk[0].shape, weights_msk[0].shape, cat.contiguous[0].shape, iscrowd.contiguous[0].shape, bbx.contiguous[0].shape, calib, do_loss, do_prediction))
 
         # Get some parameters
         img, _ = pad_packed_images(img)
@@ -246,10 +251,13 @@ class PanopticBevNet(nn.Module):
         result['vf_logits'] = vf_logits_list
         result['v_region_logits'] = v_region_logits_list
         result['f_region_logits'] = f_region_logits_list
+        if do_loss == None and msk_pred.contiguous[0] != None and sem_pred.contiguous[0] != None and sem_logits.contiguous[0] != None:
+            logger.debug("panoptic_bev output, bbx_pred: {}, cls_pred: {}, obj_pred: {}, msk_pred: {}, sem_pred: {}, sem_logits: {}, vf_logits_list: {}, v_region_logits_list: {}, f_region_logits_list: {}".format(bbx_pred.contiguous[0], cls_pred.contiguous[0], obj_pred.contiguous[0], msk_pred.contiguous[0].shape, sem_pred.contiguous[0].shape, sem_logits.contiguous[0].shape, vf_logits_list[0].shape, v_region_logits_list[0].shape, f_region_logits_list[0].shape))
         if po_pred is not None:
             result['po_pred'] = po_pred[0]
             result['po_class'] = po_pred[1]
             result['po_iscrowd'] = po_pred[2]
+            logger.debug("panoptic_bev output, po_pred: {}, po_class: {}, po_iscrowd: {}".format(po_pred[0].contiguous[0].shape, po_pred[1].contiguous[0], po_pred[2].contiguous[0]))
 
         # STATS
         stats['sem_conf'] = sem_conf_mat

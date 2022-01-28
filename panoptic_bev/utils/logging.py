@@ -5,6 +5,7 @@ from os import path
 from .meters import AverageMeter, ConstantMeter
 
 _NAME = "PanopticBEV"
+_LEVEL = logging.DEBUG #logging.INFO
 
 
 def _current_total_formatter(current, total):
@@ -14,20 +15,20 @@ def _current_total_formatter(current, total):
 
 def init(log_dir, name):
     logger = logging.getLogger(_NAME)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(_LEVEL)
 
     # Set console logging
     console_handler = logging.StreamHandler()
     console_formatter = logging.Formatter(fmt="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     console_handler.setFormatter(console_formatter)
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(_LEVEL)
     logger.addHandler(console_handler)
 
     # Setup file logging
     file_handler = logging.FileHandler(path.join(log_dir, name + ".log"), mode="w")
     file_formatter = logging.Formatter(fmt="%(levelname).1s %(asctime)s %(message)s", datefmt="%y-%m-%d %H:%M:%S")
     file_handler.setFormatter(file_formatter)
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(_LEVEL)
     logger.addHandler(file_handler)
 
 

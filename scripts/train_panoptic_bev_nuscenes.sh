@@ -8,3 +8,4 @@ python3 -m torch.distributed.launch --nproc_per_node=1 --master_addr="10.11.10.1
                                     --train_dataset=nuScenes \
                                     --val_dataset=nuScenes \
                                     --config=nuscenes.ini
+                                    # --resume="/home/hugoliu/github/PanopticBEV/weights/d3_0128_448_768/saved_models/model_latest.pth"

@@ -744,7 +744,8 @@ def main(args):
 
         # Save snapshot (only on rank 0)
         if not args.debug and rank == 0:
-            snapshot_file = path.join(saved_models_dir, "model_latest.pth")
+            pth_name = "model_epoch_{}.pth".format(epoch)
+            snapshot_file = path.join(saved_models_dir, pth_name)
             log_info("Saving snapshot to %s", snapshot_file)
             meters_out_dict = {k + "_meter": v.state_dict() for k, v in train_meters.items()}
             save_snapshot(snapshot_file, config, epoch, 0, best_score, global_step,
