@@ -7,7 +7,7 @@ import torch, torchvision
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from PIL import Image
-from panoptic_bev.utils import logging
+from panoptic_bev.utils import plogging
 from panoptic_bev.utils.semantic import g_semantic_names, g_semantic_colours, g_num_stuff, g_num_thing
 
 class NormalizeInverse(torchvision.transforms.Normalize):
@@ -30,10 +30,12 @@ class BevVisualizer(object):
     output_dir = "./"
     rgb_mean = None
     rgb_std = None
+    N = 1 # total input images
 
-    def __init__(self, config, vis_dir):
+    def __init__(self, config, vis_dir, n_imgs = 1):
         self.config = config
         self.output_dir = vis_dir
+        self.N = n_imgs
         os.makedirs(vis_dir, exist_ok=True)
         dl_config = config['dataloader']
         front_resize = dl_config.getstruct("front_resize")
@@ -81,12 +83,14 @@ class BevVisualizer(object):
         # plot_bev_grids(plot_image)
         return plot_image
 
-    def plot_bev(self, inputs, idx, bev_pred=None, bev_gt=None):
-        logger = logging.get_logger()
+    def plot_bev(self, inputs, idx, bev_pred=None, bev_gt=None, show_po=True):
+        logger = plogging.get_logger()
         output_filename = os.path.join(self.output_dir, str(idx)) + '.png'
-        fig = plt.figure(figsize=(2*self.PLT_W, 1*self.PLT_H))
-        width_ratios = (self.PLT_W, self.PLT_W)
-        gs = mpl.gridspec.GridSpec(1, 2, width_ratios=width_ratios)
+
+
+        fig = plt.figure(figsize=(3*self.PLT_W, 3*self.PLT_H))
+        width_ratios = (self.PLT_W, self.PLT_W, self.PLT_W)
+        gs = mpl.gridspec.GridSpec(3, 3, width_ratios=width_ratios)
         gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
 
         # plot raw images
@@ -94,19 +98,78 @@ class BevVisualizer(object):
             (NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             torchvision.transforms.ToPILImage(),)
         )
-        front_image = inputs["img"].cpu().contiguous[0]
-        ax = plt.subplot(gs[0, 0])
-        front_image = denormalise_img(front_image)
-        plt.imshow(front_image)
-        plt.axis("off")
+        input_images = inputs["img"].cpu().contiguous[0]
+        # logger.debug("input img: {}".format(input_images.shape))
+
+        if self.N == 1:
+            ax = plt.subplot(gs[0, 1])
+            front_image = denormalise_img(input_images)
+            plt.imshow(front_image)
+            plt.axis("off")
+        elif self.N == 6:
+            ax_f = plt.subplot(gs[0, 1])
+            f_img = denormalise_img(input_images[0])
+            plt.imshow(f_img)
+            plt.annotate("FRONT", (0.0, 0.9), c='white', xycoords='axes fraction', fontsize=14)
+            plt.axis("off")
+            ax_fl = plt.subplot(gs[0, 0])
+            fl_img = denormalise_img(input_images[1])
+            plt.imshow(fl_img)
+            plt.annotate("FRONT_LEFT", (0.0, 0.9), c='white', xycoords='axes fraction', fontsize=14)
+            plt.axis("off")
+            ax_bl = plt.subplot(gs[2, 0])
+            # backward cameras should flip for human convenient
+            bl_img = denormalise_img(input_images[2]).transpose(Image.FLIP_LEFT_RIGHT)
+            plt.imshow(bl_img)
+            plt.annotate("BACK_LEFT", (0.0, 0.9), c='white', xycoords='axes fraction', fontsize=14)
+            plt.axis("off")
+            ax_b = plt.subplot(gs[2, 1])
+            b_img = denormalise_img(input_images[3]).transpose(Image.FLIP_LEFT_RIGHT)
+            plt.imshow(b_img)
+            plt.annotate("BACK", (0.0, 0.9), c='white', xycoords='axes fraction', fontsize=14)
+            plt.axis("off")
+            ax_br = plt.subplot(gs[2, 2])
+            br_img = denormalise_img(input_images[4]).transpose(Image.FLIP_LEFT_RIGHT)
+            plt.imshow(br_img)
+            plt.annotate("BACK_RIGHT", (0.0, 0.9), c='white', xycoords='axes fraction', fontsize=14)
+            plt.axis("off")
+            ax_fr = plt.subplot(gs[0, 2])
+            fr_img = denormalise_img(input_images[5])
+            plt.imshow(fr_img)
+            plt.annotate("FRONT_RIGHT", (0.0, 0.9), c='white', xycoords='axes fraction', fontsize=14)
+            plt.axis("off")
 
         # plot bev results, cat-idx must be retrieved from po_class vector
-        bev_seg_po = bev_pred['po_pred'].cpu().contiguous[0]
+        if show_po:
+            bev_seg_po = bev_pred['po_pred'].cpu().contiguous[0]
+            # logger.debug("bev_seg_po shape: {}".format(bev_seg_po.shape))
+        else:
+            bev_seg = bev_pred['sem_pred'].cpu().contiguous[0]
+            # logger.debug("bev_seg shape: {}".format(bev_seg.shape))
         seg_cls = bev_pred['po_class'].cpu().contiguous[0].numpy()
-        bev_seg = seg_cls[bev_seg_po]
+        bbx_pred = bev_pred['bbx_pred'].cpu().contiguous[0]
+        # logger.debug("seg_cls: {}, bbx_pred: {}".format(seg_cls.shape, bbx_pred.shape))
+
+        if show_po:
+            bev_seg = seg_cls[bev_seg_po]
+
         # logger.info("seg max val {}".format(torch.max(bev_seg)))
-        ax = plt.subplot(gs[0, 1])
+        ax = plt.subplot(gs[1, 1])
         bev_image = self.plot_bev_segmentation(bev_seg)
+        # logger.debug("bev_image 1: {}".format(bev_image.shape))
+        if bbx_pred is not None:
+            for bbx in bbx_pred.numpy():
+                start_point = (int(bbx[1]), int(bbx[0]))
+                end_point = (int(bbx[3]), int(bbx[2]))
+                bev_image = cv2.rectangle(bev_image, start_point, end_point, color=(0,0,0), thickness=2)
+        # draw ego-vehicle
+        h, w, c = bev_image.shape
+        vertices = np.array([[w/2+20, h/2], [w/2-20, h/2+15], [w/2-20, h/2-15]], np.int32).reshape((-1, 1, 2))
+        cv2.fillPoly(bev_image, [vertices], color=(0,0,0))
+    
+        #set front camera to upwards, for convenient
+        bev_image = np.rot90(bev_image, k=1, axes=(0, 1))
+        # logger.debug("bev_image 2: {}".format(bev_image.shape))
         plt.imshow(self.make_contour(bev_image))
         plt.axis("off")
 

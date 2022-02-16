@@ -1,13 +1,14 @@
 import glob
 from itertools import chain
-import os
+import os, sys
 import cv2
 import torch
 import torch.utils.data as data
 import umsgpack
 import json
 from panoptic_bev.data.transform import *
-from panoptic_bev.utils import logging
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 class BEVKitti360Dataset(data.Dataset):
     _IMG_DIR = "img"
@@ -181,6 +182,8 @@ class BEVNuScenesDataset(data.Dataset):
     _BEV_DIR = "bev_ortho"
     _LST_DIR = "split"
     _METADATA_FILE = "metadata_ortho.bin"
+    _EXTRINSICS = None
+    _VALID_MSK = None
 
     def __init__(self, seam_root_dir, dataset_root_dir, split_name, transform):
         super(BEVNuScenesDataset, self).__init__()
@@ -203,7 +206,6 @@ class BEVNuScenesDataset(data.Dataset):
 
     # Load the train or the validation split
     def _load_split(self):
-        logger = logging.get_logger()
         with open(os.path.join(self.seam_root_dir, BEVNuScenesDataset._METADATA_FILE), "rb") as fid:
             metadata = umsgpack.unpack(fid, encoding="utf-8")
 
@@ -230,7 +232,6 @@ class BEVNuScenesDataset(data.Dataset):
         return meta, images, img_map
 
     def _load_item(self, item_idx):
-        logger = logging.get_logger()
         img_desc = self._images[item_idx]
 
         # Get the RGB file names
@@ -332,6 +333,10 @@ class BEVNuScenesDataset(data.Dataset):
 
         rec["idx"] = idx
         rec["size"] = size
+        # rec["calib"] = [rec["calib"]] ## calib should be list, just like img
+        rec["extrinsics"] = torch.tensor([self._EXTRINSICS["translation"], self._EXTRINSICS["rotation"]], dtype=torch.float) #[self._EXTRINSICS]
+        rec["valid_msk"] = torch.from_numpy(self._VALID_MSK) #[self._VALID_MSK]
+        # logger.debug("img: {}".format(rec["img"][0].shape))
         return rec
 
     def get_image_desc(self, idx):
@@ -341,3 +346,9 @@ class BEVNuScenesDataset(data.Dataset):
             return matching[0]
         else:
             raise ValueError("No image found with id %s" % idx)
+
+    def set_extrinsics(self, extrinsics):
+        self._EXTRINSICS = extrinsics
+
+    def set_validmsk(self, validmsk):
+        self._VALID_MSK = validmsk

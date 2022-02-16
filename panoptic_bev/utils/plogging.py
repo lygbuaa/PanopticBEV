@@ -1,7 +1,7 @@
-import logging
+import logging, sys
 from math import log10
 from os import path
-
+# sys.path.append("/home/hugoliu/github/PanopticBEV/panoptic_bev/utils")
 from .meters import AverageMeter, ConstantMeter
 
 _NAME = "PanopticBEV"
@@ -19,14 +19,14 @@ def init(log_dir, name):
 
     # Set console logging
     console_handler = logging.StreamHandler()
-    console_formatter = logging.Formatter(fmt="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    console_formatter = logging.Formatter(fmt="%(levelname).1s%(asctime)s.%(msecs)03d    %(process)d %(filename)s:%(lineno)d] %(message)s", datefmt="%H:%M:%S")
     console_handler.setFormatter(console_formatter)
     console_handler.setLevel(_LEVEL)
     logger.addHandler(console_handler)
 
     # Setup file logging
     file_handler = logging.FileHandler(path.join(log_dir, name + ".log"), mode="w")
-    file_formatter = logging.Formatter(fmt="%(levelname).1s %(asctime)s %(message)s", datefmt="%y-%m-%d %H:%M:%S")
+    file_formatter = logging.Formatter(fmt="%(levelname).1s%(asctime)s.%(msecs)03d    %(process)d %(filename)s:%(lineno)d] %(message)s", datefmt="%y-%m-%d %H:%M:%S")
     file_handler.setFormatter(file_formatter)
     file_handler.setLevel(_LEVEL)
     logger.addHandler(file_handler)

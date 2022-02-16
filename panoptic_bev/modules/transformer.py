@@ -1,11 +1,13 @@
 import torch.nn as nn
 from torch.nn import functional as F
-import torch
+import torch, math
 # import kornia
 from kornia.geometry.transform import warp_perspective
 from inplace_abn import ABN
 
 from panoptic_bev.utils.transformer import get_init_homography
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 
 class VerticalTransformer(nn.Module):
@@ -45,7 +47,7 @@ class VerticalTransformer(nn.Module):
         self.depth_extender_dummy = nn.Conv3d(Z_out, Z_out, 1, padding=0, bias=False)
         self.depth_estimation_dummy = nn.Conv2d(Z_out, Z_out, 1, padding=0, bias=False)
 
-    def forward(self, v_feat, intrinsics):
+    def forward(self, v_feat, intrinsics, extrinsics=None):
         
         # Generate the depth-based spatial occupancy map (attention map)
         v_depth_feat = self.depth_estimation_dummy(self.depth_estimation(v_feat))
@@ -144,13 +146,13 @@ class FlatTransformer(nn.Module):
 
         self.warper = Perspective2OrthographicWarper(extents, img_scale, resolution)
 
-    def forward(self, feat, intrinsics):
+    def forward(self, feat, intrinsics, extrinsics=None):
         feat = self.f_dummy(self.ch_mapper_in(feat))
-
         # Apply the IPM algorithm on the flat regions.
         # We compute the homography using the known camera intrinsics and kornia applies the homography
         theta_ipm_list = []
         for b_idx in range(feat.shape[0]):
+            # be careful, self.extrinsics is dedicated to image-plane->bev-plane, which don't care about vehicle coordinate
             theta_ipm_i = get_init_homography(intrinsics[b_idx].cpu().numpy(), self.extrinsics, self.bev_params,
                                               self.img_scale, self.out_img_size_reverse).view(-1, 3, 3).to(feat.device)
             theta_ipm_list.append(theta_ipm_i)
@@ -260,6 +262,8 @@ class Perspective2OrthographicWarper(nn.Module):
 
 
 class TransformerVF(nn.Module):
+    BEV_RESOLUTION = 1.0
+
     def __init__(self, in_ch, tfm_ch, out_ch,  extrinsics=None, bev_params=None, H_in=None, W_in=None, Z_out=None,
                  W_out=None, img_scale=None, norm_act=ABN):
         super(TransformerVF, self).__init__()
@@ -279,6 +283,7 @@ class TransformerVF(nn.Module):
         self.Z_out = int(Z_out * img_scale)
         self.W_out = int(W_out * img_scale)
         resolution = bev_params['cam_z'] / bev_params['f'] / img_scale
+        self.BEV_RESOLUTION = resolution
         # This is the output mask grid which will be used to correct the perspective distortion.
         # (W_out * img_scale) to bring it the current scale. (* resolution) to convert it into metres
         # /2 to centre the car in the image vertically
@@ -299,7 +304,7 @@ class TransformerVF(nn.Module):
         self.dummy = nn.Conv2d(out_ch, out_ch, 1, padding=0, bias=False)
 
 
-    def forward(self, feat, intrinsics):
+    def forward(self, feat, intrinsics, extrinsics=None, valid_msk=None):
         feat = self.ch_mapper_in(feat)
 
         # Compute the vertical-flat attention mask
@@ -316,8 +321,8 @@ class TransformerVF(nn.Module):
         del v_att, f_att
 
         # Perform the transformations on vertical and flat regions of the image plane feature map
-        feat_v, v_region_logits = self.v_transform(feat_v, intrinsics)
-        feat_f, f_region_logits = self.f_transform(feat_f, intrinsics)
+        feat_v, v_region_logits = self.v_transform(feat_v, intrinsics, extrinsics=None)
+        feat_f, f_region_logits = self.f_transform(feat_f, intrinsics, extrinsics=None)
 
         # Resize the feature maps to the output size
         # This takes into account the extreme cases where one dimension is a few pixels short
@@ -327,6 +332,7 @@ class TransformerVF(nn.Module):
         # Merge the vertical and flat transforms
         feat_merged = self.merge_feat_vf(feat_v, feat_f)
         feat_merged = self.dummy(self.ch_mapper_out(feat_merged))
+        # logger.debug("feat_v: {}, feat_f: {}, feat_merged: {}".format(feat_v.shape, feat_f.shape, feat_merged.shape))
 
         del feat_v, feat_f
 
@@ -336,4 +342,30 @@ class TransformerVF(nn.Module):
         v_region_logits = torch.rot90(v_region_logits, k=1, dims=[2, 3])
         f_region_logits = torch.rot90(f_region_logits, k=1, dims=[2, 3])
 
+        # make sure it's eval process, not training
+        if valid_msk is not None:
+            #filter with valid_msk, maybe optional
+            # logger.debug("feat_merged: {}".format(feat_merged.shape))
+            N, C, H, W = feat_merged.shape
+            msk_t = valid_msk.unsqueeze(0).unsqueeze(0)
+            msk_t = F.interpolate(msk_t, (H, W), mode="nearest")
+            feat_merged = torch.mul(feat_merged, msk_t)
+            # feature affine
+        if extrinsics is not None:
+            ccw_angle = extrinsics[1][0]
+            tx = -1.0 - extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out
+            ty = 0.0 + extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
+            feat_merged = self.feat_affine(feat_merged, angle=ccw_angle, tx=tx, ty=ty)
+            # v_region_logits = self.feat_affine(v_region_logits, angle=0.0, tx=0, ty=0)
+            # f_region_logits = self.feat_affine(f_region_logits, angle=0.0, tx=0, ty=0)
+        # else:
+        #     feat_merged = self.feat_affine(feat_merged, angle=0.0, tx=0.0, ty=-1.0)
+
         return feat_merged, vf_logits, v_region_logits, f_region_logits
+
+
+    def feat_affine(self, feat, angle=90.0, tx=0.0, ty=0.0):
+        angle = angle*math.pi/180.0
+        theta = torch.tensor([[math.cos(angle), math.sin(-angle), tx],[math.sin(angle), math.cos(angle), ty]], dtype=torch.float)
+        grid = F.affine_grid(theta.unsqueeze(0), feat.size()).to(feat.device)
+        return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros').to(feat.device)

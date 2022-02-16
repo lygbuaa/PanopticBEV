@@ -29,7 +29,6 @@ from panoptic_bev.algos.detection import PredictionGenerator as BbxPredictionGen
 from panoptic_bev.algos.semantic_seg import SemanticSegLoss, SemanticSegAlgo
 from panoptic_bev.algos.po_fusion import PanopticLoss, PanopticFusionAlgo
 
-from panoptic_bev.utils import logging
 from panoptic_bev.utils.meters import AverageMeter, ConfusionMatrixMeter
 from panoptic_bev.utils.misc import config_to_string, norm_act_from_config
 from panoptic_bev.utils.parallel import DistributedDataParallel
@@ -39,7 +38,13 @@ from panoptic_bev.utils.sequence import pad_packed_images
 from panoptic_bev.utils.panoptic import compute_panoptic_test_metrics, panoptic_post_processing, get_panoptic_scores
 
 from panoptic_bev.utils.BevVisualizer import BevVisualizer
+from panoptic_bev.utils.ValidMask import ValidMask
+from panoptic_bev.utils.Nuscenes_tools import BEVTransformV2, BEVNuScenesDatasetV2
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 # from thop import profile
+
+g_run_multi_view=True
 
 parser = argparse.ArgumentParser(description="Panoptic BEV Evaluation Script")
 parser.add_argument("--local_rank", required=True, type=int)
@@ -65,11 +70,11 @@ def log_info(msg, *args, **kwargs):
         print(msg % args)
     else:
         if distributed.get_rank() == 0:
-            logging.get_logger().info(msg, *args, **kwargs)
+            plogging.get_logger().info(msg, *args, **kwargs)
 
 
 def log_miou(label, miou, classes):
-    logger = logging.get_logger()
+    # logger = plogging.get_logger()
     padding = max(len(cls) for cls in classes)
 
     logger.info("---------------- {} ----------------".format(label))
@@ -78,7 +83,7 @@ def log_miou(label, miou, classes):
 
 
 def log_scores(label, scores):
-    logger = logging.get_logger()
+    # logger = plogging.get_logger()
     padding = max(len(cls) for cls in scores.keys())
 
     logger.info("---------------- {} ----------------".format(label))
@@ -127,11 +132,30 @@ def create_run_directories(args, rank):
 
     return log_dir, saved_models_dir, config_path, vis_dir
 
+def make_dataloader_v2(args, config, rank, world_size):
+    dl_config = config['dataloader']
+    log_info("Creating test dataloader for {} dataset, rank: {}, world_size: {}".format(args.test_dataset, rank, world_size), debug=args.debug)
+    # Evaluation datalaader
+    tfv2 = BEVTransformV2(shortest_size=dl_config.getint("shortest_size"),
+                          longest_max_size=dl_config.getint("longest_max_size"),
+                          rgb_mean=dl_config.getstruct("rgb_mean"),
+                          rgb_std=dl_config.getstruct("rgb_std"),
+                          front_resize=dl_config.getstruct("front_resize"))
+    datasetv2 = BEVNuScenesDatasetV2(nuscenes_version="v1.0-mini", nuscenes_root_dir="/home/hugoliu/github/dataset/nuscenes/mini", 
+                transform=tfv2, bev_size=dl_config.getstruct("bev_crop"))
+    test_sampler = DistributedARBatchSampler(datasetv2, dl_config.getint("val_batch_size"), world_size, rank, False)
+    test_dl = torch.utils.data.DataLoader(datasetv2,
+                                            batch_sampler=test_sampler,
+                                            collate_fn=iss_collate_fn,
+                                            pin_memory=True,
+                                            num_workers=1) #num_workers=dl_config.getint("val_workers")
+    return test_dl
+
 
 def make_dataloader(args, config, rank, world_size):
     dl_config = config['dataloader']
 
-    log_info("Creating test dataloader for {} dataset".format(args.test_dataset), debug=args.debug)
+    log_info("Creating test dataloader for {} dataset, rank: {}, world_size: {}".format(args.test_dataset, rank, world_size), debug=args.debug)
 
     # Evaluation datalaader
     test_tf = BEVTransform(shortest_size=dl_config.getint("shortest_size"),
@@ -147,6 +171,13 @@ def make_dataloader(args, config, rank, world_size):
     elif args.test_dataset == "nuScenes":
         test_db = BEVNuScenesDataset(seam_root_dir=args.seam_root_dir, dataset_root_dir=args.dataset_root_dir,
                                     split_name=dl_config['val_set'], transform=test_tf)
+        # set extrinsics and valid_msk into BEVNuScenesDataset
+        cam_config = config['cameras']
+        test_db.set_extrinsics(cam_config.getstruct('extrinsics'))
+        Z_out=int(dl_config.getstruct("bev_crop")[1] * dl_config.getfloat('scale'))
+        W_out=int(dl_config.getstruct('bev_crop')[0] * dl_config.getfloat('scale'))
+        valid_msk = ValidMask()
+        test_db.set_validmsk(valid_msk.generate(h=W_out, w=Z_out, fov_l=30, fov_r=30))
 
     if not args.debug:
         test_sampler = DistributedARBatchSampler(test_db, dl_config.getint("val_batch_size"), world_size, rank, False)
@@ -354,14 +385,13 @@ def log_iter(mode, meters, time_meters, results, metrics, batch=True, **kwargs):
                 log_value = metrics[log_key]
             log_entries.append((log_key, log_value))
 
-    logging.iteration(kwargs["summary"], mode, kwargs["global_step"], kwargs["epoch"] + 1, kwargs["num_epochs"],
+    plogging.iteration(kwargs["summary"], mode, kwargs["global_step"], kwargs["epoch"] + 1, kwargs["num_epochs"],
                       kwargs['curr_iter'], kwargs['num_iters'], OrderedDict(log_entries))
 
 
 def test(model, dataloader, **varargs):
     global g_bev_visualizer
 
-    logger = logging.get_logger()
     model.eval()
 
     if not varargs['debug']:
@@ -401,28 +431,49 @@ def test(model, dataloader, **varargs):
     panoptic_buffer = torch.zeros(4, num_classes, dtype=torch.double)
     po_conf_mat = torch.zeros(256, 256, dtype=torch.double)
     sem_conf_mat = torch.zeros(num_classes, num_classes, dtype=torch.double)
+
     logger.debug("num_stuff: {}, num_thing: {}, panoptic_buffer: {}, po_conf_mat: {}, sem_conf_mat: {}".format(num_stuff, num_thing, panoptic_buffer.shape, po_conf_mat.shape, sem_conf_mat.shape))
 
     data_time = time.time()
 
     for it, sample in enumerate(dataloader):
         # eval with front-100 images
-        if it > 100:
+        if it > 50:
             break
-        batch_sizes = [m.shape[-2:] for m in sample['bev_msk']]
+        if sample['bev_msk'][0] is None:
+            batch_sizes = [torch.Size([896, 768])]
+        else:
+            batch_sizes = [m.shape[-2:] for m in sample['bev_msk']]
         original_sizes = sample['size']
         idxs = sample['idx']
         do_loss=False
+        # extrin = sample["extrinsics"]
+        # validmsk = sample["valid_msk"]
+        # logger.debug("sample: {}".format(sample))
+        # logger.debug(("eval idx: {}, batch_sizes: {}, original_sizes: {}, img: {}").format(idxs, batch_sizes, original_sizes, sample['img'][0].shape))
         with torch.no_grad():
-            sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
-            sample['calib'], _ = pad_packed_images(sample['calib'])
+            if not g_run_multi_view:
+                sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
+            else:
+                sample_cuda = {}
+                for k in NETWORK_INPUTS:
+                    val = sample[k]
+                    if isinstance(val, list):
+                        if val[0] is None:
+                            sample_cuda[k] = None
+                        else:
+                            sample_cuda[k] = val
+                    else:
+                        sample_cuda[k] = val.cuda(device=varargs['device'], non_blocking=True)
+                sample = sample_cuda
+
+            # sample['calib'], _ = pad_packed_images(sample['calib'])
 
             time_meters['data_time'].update(torch.tensor(time.time() - data_time))
             batch_time = time.time()
 
-            logger.debug(("eval idx: {}, batch_sizes: {}, original_sizes: {}, calib: {}").format(idxs, batch_sizes, original_sizes, sample['calib']))
             # Run network
-            losses, results, stats = model(**sample, do_loss=do_loss, do_prediction=True)
+            losses, results, stats = model(**sample, do_loss=do_loss, do_prediction=True, multi_view=g_run_multi_view)
             # logger.debug("model results: {}".format(results))
             # inputs = (sample["img"], sample["bev_msk"], sample["front_msk"], sample["weights_msk"], sample["cat"], sample["iscrowd"], sample["bbx"], sample["calib"], False, True)
             # macs, params = profile(model, inputs)
@@ -544,17 +595,20 @@ def main(args):
     # Load configuration
     config = make_config(args, config_file)
 
-    g_bev_visualizer = BevVisualizer(config, vis_dir)
+    g_bev_visualizer = BevVisualizer(config, vis_dir, n_imgs=6 if g_run_multi_view else 1)
 
     # Initialize logging only for rank 0
     if not args.debug and rank == 0:
-        logging.init(log_dir, "train" if args.mode == 'train' else "test")
+        plogging.init(log_dir, "train" if args.mode == 'train' else "test")
         summary = tensorboard.SummaryWriter(log_dir)
     else:
         summary = None
 
     # Create dataloaders
-    test_dataloader = make_dataloader(args, config, rank, world_size)
+    if g_run_multi_view:
+        test_dataloader = make_dataloader_v2(args, config, rank, world_size)
+    else:
+        test_dataloader = make_dataloader(args, config, rank, world_size)
 
     # Create model
     model = make_model(args, config, test_dataloader.dataset.num_thing, test_dataloader.dataset.num_stuff)

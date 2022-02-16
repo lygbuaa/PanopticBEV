@@ -31,7 +31,7 @@ from panoptic_bev.algos.detection import PredictionGenerator as BbxPredictionGen
 from panoptic_bev.algos.semantic_seg import SemanticSegLoss, SemanticSegAlgo
 from panoptic_bev.algos.po_fusion import PanopticLoss, PanopticFusionAlgo
 
-from panoptic_bev.utils import logging
+from panoptic_bev.utils import plogging
 from panoptic_bev.utils.meters import AverageMeter, ConfusionMatrixMeter, ConstantMeter
 from panoptic_bev.utils.misc import config_to_string, scheduler_from_config, norm_act_from_config, all_reduce_losses
 from panoptic_bev.utils.parallel import DistributedDataParallel
@@ -65,11 +65,11 @@ def log_info(msg, *args, **kwargs):
         print(msg % args)
     else:
         if distributed.get_rank() == 0:
-            logging.get_logger().info(msg, *args, **kwargs)
+            plogging.get_logger().info(msg, *args, **kwargs)
 
 
 def log_miou(label, miou, classes):
-    logger = logging.get_logger()
+    logger = plogging.get_logger()
     padding = max(len(cls) for cls in classes)
 
     logger.info("---------------- {} ----------------".format(label))
@@ -78,7 +78,7 @@ def log_miou(label, miou, classes):
 
 
 def log_scores(label, scores):
-    logger = logging.get_logger()
+    logger = plogging.get_logger()
     padding = max(len(cls) for cls in scores.keys())
 
     logger.info("---------------- {} ----------------".format(label))
@@ -404,7 +404,7 @@ def log_iter(mode, meters, time_meters, results, metrics, batch=True, **kwargs):
                 log_value = metrics[log_key]
             log_entries.append((log_key, log_value))
 
-    logging.iteration(kwargs["summary"], mode, kwargs["global_step"], kwargs["epoch"] + 1, kwargs["num_epochs"],
+    plogging.iteration(kwargs["summary"], mode, kwargs["global_step"], kwargs["epoch"] + 1, kwargs["num_epochs"],
                       kwargs['curr_iter'], kwargs['num_iters'], OrderedDict(log_entries))
 
 
@@ -653,7 +653,7 @@ def main(args):
 
     # Initialize logging only for rank 0
     if not args.debug and rank == 0:
-        logging.init(log_dir, "train" if args.mode == 'train' else "test")
+        plogging.init(log_dir, "train" if args.mode == 'train' else "test")
         summary = tensorboard.SummaryWriter(log_dir)
     else:
         summary = None

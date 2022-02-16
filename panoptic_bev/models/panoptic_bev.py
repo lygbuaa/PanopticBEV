@@ -2,10 +2,13 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 from panoptic_bev.utils.sequence import pad_packed_images
-from panoptic_bev.utils import logging
+from panoptic_bev.utils.parallel.packed_sequence import PackedSequence
+import torch.utils.checkpoint as checkpoint
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 
-NETWORK_INPUTS = ["img", "bev_msk", "front_msk", "weights_msk", "cat", "iscrowd", "bbx", "calib"]
+NETWORK_INPUTS = ["img", "bev_msk", "front_msk", "weights_msk", "cat", "iscrowd", "bbx", "calib", "extrinsics", "valid_msk"]
 
 class PanopticBevNet(nn.Module):
     def __init__(self,
@@ -131,26 +134,24 @@ class PanopticBevNet(nn.Module):
 
         return cat_out, iscrowd_out, bbx_out, ids_out, sem_out, po_out, po_vis_out
 
-    def forward(self, img, bev_msk=None, front_msk=None, weights_msk=None, cat=None, iscrowd=None, bbx=None, calib=None,
-                do_loss=False, do_prediction=False):
-        logger = logging.get_logger()
+    def forward(self, img, bev_msk=None, front_msk=None, weights_msk=None, cat=None, iscrowd=None, bbx=None, calib=None, extrinsics=None, valid_msk=None,
+                do_loss=False, do_prediction=False, multi_view=False):
         result = OrderedDict()
         loss = OrderedDict()
         stats = OrderedDict()
-        if (front_msk is not None) and (bev_msk is not None) and (weights_msk is not None):
-            logger.debug("panoptic_bev input, img: {}, bev_msk: {}, front_msk: {}, weights_msk: {}, cat:{}, iscrowd: {}, bbx: {}, calib: {}, do_loss: {}, do_prediction: {}".format(img[0].shape, bev_msk[0].shape, front_msk[0].shape, weights_msk[0].shape, cat.contiguous[0].shape, iscrowd.contiguous[0].shape, bbx.contiguous[0].shape, calib, do_loss, do_prediction))
+        if multi_view:
+            logger.info("img PackedSequence __len__(): {}, extrinsics len: {}, valid_msk len: {}".format(img.__len__(), len(extrinsics), len(valid_msk)))
+            # logger.debug("panoptic_bev input, img: {},  cat:{}, iscrowd: {}, bbx: {}, do_loss: {}, do_prediction: {}".format(img, bev_msk, front_msk, weights_msk, cat, iscrowd, bbx, do_loss, do_prediction))
 
-        # Get some parameters
-        img, _ = pad_packed_images(img)
-
-        if bev_msk is not None:
+        if not multi_view and bev_msk is not None:
             bev_msk, valid_size = pad_packed_images(bev_msk)
             img_size = bev_msk.shape[-2:]
+            # logger.debug("valid_size: {}".format(valid_size)) #[torch.Size([896, 768])]
         else:
-            valid_size = [torch.Size([896, 768])] * img.shape[0]
+            valid_size = [torch.Size([896, 768])]
             img_size = torch.Size([896, 768])
 
-        if front_msk is not None:
+        if not multi_view and front_msk is not None:
             front_msk, _ = pad_packed_images(front_msk)
 
         if do_loss:
@@ -166,11 +167,49 @@ class PanopticBevNet(nn.Module):
         else:
             po_gt, po_gt_vis = None, None
 
-        # Get the image features
-        ms_feat = self.body(img)
+        # Get some parameters
+        # pad img list into torch.Size([N, 3, 448, 768]), originally N=1
+        ms_bev = None
+        vf_logits_list = None
+        v_region_logits_list = None
+        f_region_logits_list = None
+        
 
-        # Transform from the front view to the BEV and upsample the height dimension
-        ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, calib)
+        # just keep training process unchanged
+        if not multi_view:
+            calib, _ = pad_packed_images(calib)
+            img, _ = pad_packed_images(img)
+            ms_feat = self.body(img)
+            ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, calib)
+        else:
+            for idx, (image, intrin, extrin, msk) in enumerate(zip(img[0], calib[0], extrinsics[0], valid_msk[0])):
+                logger.debug("process camera-{}, img: {}, intrinsics: {}, extrinsics: {}, msk: {}".format(idx, image.shape, intrin.shape, extrin, msk.shape))
+                img, _ = pad_packed_images(PackedSequence(image))
+                intrin, _ = pad_packed_images(PackedSequence(intrin))
+                # Get the image features
+                ms_feat = self.body(img)
+                # ms_feat = checkpoint.checkpoint(self.body, img)
+
+                # Transform from the front view to the BEV and upsample the height dimension
+                ms_bev_tmp, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, intrin, extrin, msk)
+                if ms_bev == None:
+                    ms_bev = ms_bev_tmp
+                else:
+                    for idx, f in enumerate(ms_bev_tmp):
+                        ms_bev[idx] += f
+
+                del ms_feat, ms_bev_tmp
+
+        # debug_str = "ms_feat: "
+        # for i, f in enumerate(ms_feat):
+        #     tmp_str = " {}-{},".format(i, f.shape)
+        #     debug_str += tmp_str
+        # debug_str += " ms_bev: "
+        # for i, f in enumerate(ms_bev):
+        #     tmp_str = " {}-{},".format(i, f.shape)
+        #     debug_str += tmp_str
+        # logger.debug(debug_str)
+
         if do_loss:
             vf_loss, v_region_loss, f_region_loss = self.transformer_algo.training(vf_logits_list, v_region_logits_list,
                                                                                    f_region_logits_list, vf_mask_gt,
@@ -206,6 +245,7 @@ class PanopticBevNet(nn.Module):
 
         # Segmentation Part
         if do_loss:
+            # be careful: do_loss=True stands for training mode, only using front_camera, so calib[0] is enough
             sem_loss, sem_conf_mat, sem_pred, sem_logits, sem_feat = self.sem_algo.training(self.sem_head, ms_bev,
                                                                                             sem_gt, bbx, valid_size,
                                                                                             img_size, weights_msk,
@@ -222,6 +262,7 @@ class PanopticBevNet(nn.Module):
             # The second channel contains the instance masks with the instance label being the corresponding semantic label
             po_pred, po_loss, po_logits = self.po_fusion_algo.inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred,
                                                                         img_size)
+            # logger.debug("po_fusion input: sem_logits: {}, roi_msk_logits: {}, bbx_pred: {}, cls_pred: {}, img_size: {}".format(sem_logits[0].shape, roi_msk_logits[0].shape, bbx_pred[0].shape, cls_pred[0].shape, img_size))
         elif do_loss:
             po_loss = self.po_fusion_algo.training(sem_logits, roi_msk_logits, bbx, cat, po_gt, img_size)
             po_pred, po_logits = None, None
@@ -251,13 +292,18 @@ class PanopticBevNet(nn.Module):
         result['vf_logits'] = vf_logits_list
         result['v_region_logits'] = v_region_logits_list
         result['f_region_logits'] = f_region_logits_list
-        if do_loss == None and msk_pred.contiguous[0] != None and sem_pred.contiguous[0] != None and sem_logits.contiguous[0] != None:
-            logger.debug("panoptic_bev output, bbx_pred: {}, cls_pred: {}, obj_pred: {}, msk_pred: {}, sem_pred: {}, sem_logits: {}, vf_logits_list: {}, v_region_logits_list: {}, f_region_logits_list: {}".format(bbx_pred.contiguous[0], cls_pred.contiguous[0], obj_pred.contiguous[0], msk_pred.contiguous[0].shape, sem_pred.contiguous[0].shape, sem_logits.contiguous[0].shape, vf_logits_list[0].shape, v_region_logits_list[0].shape, f_region_logits_list[0].shape))
+        if do_loss == False and msk_pred.contiguous[0] != None and sem_pred.contiguous[0] != None and sem_logits.contiguous[0] != None:
+            logger.info("panoptic_bev output, bbx_pred: {}, cls_pred: {}, obj_pred: {}, msk_pred: {}, sem_pred: {}, sem_logits: {}, vf_logits_list: {}, v_region_logits_list: {}, f_region_logits_list: {}".format(bbx_pred.contiguous[0], cls_pred.contiguous[0], obj_pred.contiguous[0], msk_pred.contiguous[0].shape, sem_pred.contiguous[0].shape, sem_logits.contiguous[0].shape, vf_logits_list[0].shape, v_region_logits_list[0].shape, f_region_logits_list[0].shape))
         if po_pred is not None:
+            # filter semantic results with valid_msk
+            if not do_loss and not multi_view:
+                msk_t = valid_msk[0].to(po_pred[0].device)
+                # po_pred[0] = PackedSequence(torch.mul(po_pred[0][0], msk_t))
+
             result['po_pred'] = po_pred[0]
             result['po_class'] = po_pred[1]
             result['po_iscrowd'] = po_pred[2]
-            logger.debug("panoptic_bev output, po_pred: {}, po_class: {}, po_iscrowd: {}".format(po_pred[0].contiguous[0].shape, po_pred[1].contiguous[0], po_pred[2].contiguous[0]))
+            logger.info("panoptic_bev output, po_pred: {}, po_class: {}, po_iscrowd: {}".format(po_pred[0].contiguous[0].shape, po_pred[1].contiguous[0], po_pred[2].contiguous[0]))
 
         # STATS
         stats['sem_conf'] = sem_conf_mat
