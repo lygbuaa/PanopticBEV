@@ -350,12 +350,20 @@ class TransformerVF(nn.Module):
             msk_t = valid_msk.unsqueeze(0).unsqueeze(0)
             msk_t = F.interpolate(msk_t, (H, W), mode="nearest")
             feat_merged = torch.mul(feat_merged, msk_t)
-            # feature affine
+            # double bev size, padding on last dim, left_side
+            feat_merged = F.pad(feat_merged, (W, 0), mode="constant", value=0)
+
+        # feature affine
         if extrinsics is not None:
             ccw_angle = extrinsics[1][0]
-            tx = -1.0 - extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out
-            ty = 0.0 + extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
+            # if keep bev output as [896, 768]
+            # tx = -1.0 - extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out
+            # ty = 0.0 + extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
+            # if double bev output to [896, 768*2]
+            tx = -1 * extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out/2
+            ty = extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
             feat_merged = self.feat_affine(feat_merged, angle=ccw_angle, tx=tx, ty=ty)
+            # v_region_logits & f_region_logits are useless in prediction
             # v_region_logits = self.feat_affine(v_region_logits, angle=0.0, tx=0, ty=0)
             # f_region_logits = self.feat_affine(f_region_logits, angle=0.0, tx=0, ty=0)
         # else:

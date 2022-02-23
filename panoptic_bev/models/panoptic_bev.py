@@ -148,8 +148,8 @@ class PanopticBevNet(nn.Module):
             img_size = bev_msk.shape[-2:]
             # logger.debug("valid_size: {}".format(valid_size)) #[torch.Size([896, 768])]
         else:
-            valid_size = [torch.Size([896, 768])]
-            img_size = torch.Size([896, 768])
+            valid_size = [torch.Size([896, 768*2])] # for multi_view, double Z_out
+            img_size = torch.Size([896, 768*2]) # for multi_view, double Z_out
 
         if not multi_view and front_msk is not None:
             front_msk, _ = pad_packed_images(front_msk)

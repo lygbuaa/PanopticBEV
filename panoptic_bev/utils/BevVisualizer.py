@@ -148,6 +148,7 @@ class BevVisualizer(object):
             # logger.debug("bev_seg shape: {}".format(bev_seg.shape))
         seg_cls = bev_pred['po_class'].cpu().contiguous[0].numpy()
         bbx_pred = bev_pred['bbx_pred'].cpu().contiguous[0]
+        cls_pred = bev_pred['cls_pred'].cpu().contiguous[0]
         # logger.debug("seg_cls: {}, bbx_pred: {}".format(seg_cls.shape, bbx_pred.shape))
 
         if show_po:
@@ -158,17 +159,19 @@ class BevVisualizer(object):
         bev_image = self.plot_bev_segmentation(bev_seg)
         # logger.debug("bev_image 1: {}".format(bev_image.shape))
         if bbx_pred is not None:
-            for bbx in bbx_pred.numpy():
+            for idx, bbx in enumerate(bbx_pred.numpy()):
                 start_point = (int(bbx[1]), int(bbx[0]))
                 end_point = (int(bbx[3]), int(bbx[2]))
-                bev_image = cv2.rectangle(bev_image, start_point, end_point, color=(0,0,0), thickness=2)
+                cls = cls_pred.numpy()[idx]
+                rgb = g_semantic_colours[cls + g_num_stuff]
+                bev_image = cv2.rectangle(bev_image, start_point, end_point, color=(int(rgb[0]), int(rgb[1]), int(rgb[2])), thickness=2)
         # draw ego-vehicle
         h, w, c = bev_image.shape
         vertices = np.array([[w/2+20, h/2], [w/2-20, h/2+15], [w/2-20, h/2-15]], np.int32).reshape((-1, 1, 2))
         cv2.fillPoly(bev_image, [vertices], color=(0,0,0))
     
         #set front camera to upwards, for convenient
-        bev_image = np.rot90(bev_image, k=1, axes=(0, 1))
+        # bev_image = np.rot90(bev_image, k=1, axes=(0, 1))
         # logger.debug("bev_image 2: {}".format(bev_image.shape))
         plt.imshow(self.make_contour(bev_image))
         plt.axis("off")
