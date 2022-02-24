@@ -475,9 +475,16 @@ def test(model, dataloader, **varargs):
             # Run network
             losses, results, stats = model(**sample, do_loss=do_loss, do_prediction=True, multi_view=g_run_multi_view)
             # logger.debug("model results: {}".format(results))
-            # inputs = (sample["img"], sample["bev_msk"], sample["front_msk"], sample["weights_msk"], sample["cat"], sample["iscrowd"], sample["bbx"], sample["calib"], False, True)
+
+            # inputs = (sample["img"], sample["bev_msk"], sample["front_msk"], sample["weights_msk"], sample["cat"], sample["iscrowd"], sample["bbx"], sample["calib"], sample["extrinsics"], sample["valid_msk"], False, True, True)
             # macs, params = profile(model, inputs)
             # logger.info("thop profile, macs: {}, params: {}".format(macs, params))
+
+            # export onnx
+            # if it == 0:
+            #     torch.onnx.export(model, inputs, "panopticbev.onnx", 
+            #                     export_params=True, opset_version=11, do_constant_folding=True, 
+            #                     input_names=["input"], output_names=["output"])
 
             if not varargs['debug']:
                 distributed.barrier()

@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from panoptic_bev.utils import plogging
 from panoptic_bev.utils.semantic import g_semantic_names, g_semantic_colours, g_num_stuff, g_num_thing
+from datetime import datetime
 
 class NormalizeInverse(torchvision.transforms.Normalize):
     #  https://discuss.pytorch.org/t/simple-way-to-inverse-transform-normalization/4821/8
@@ -85,8 +86,9 @@ class BevVisualizer(object):
 
     def plot_bev(self, inputs, idx, bev_pred=None, bev_gt=None, show_po=True):
         logger = plogging.get_logger()
-        output_filename = os.path.join(self.output_dir, str(idx)) + '.png'
-
+        now = datetime.now()
+        dt_str = now.strftime("%Y%m%d-%H%M%S-")
+        output_filename = os.path.join(self.output_dir, dt_str + str(idx)) + '.png'
 
         fig = plt.figure(figsize=(3*self.PLT_W, 3*self.PLT_H))
         width_ratios = (self.PLT_W, self.PLT_W, self.PLT_W)

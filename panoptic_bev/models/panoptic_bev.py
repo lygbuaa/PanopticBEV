@@ -181,6 +181,9 @@ class PanopticBevNet(nn.Module):
             img, _ = pad_packed_images(img)
             ms_feat = self.body(img)
             ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, calib)
+            # ms_feat = checkpoint.checkpoint(self.body, img)
+            # ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = checkpoint.checkpoint(self.transformer, ms_feat, calib)
+            del ms_feat
         else:
             for idx, (image, intrin, extrin, msk) in enumerate(zip(img[0], calib[0], extrinsics[0], valid_msk[0])):
                 logger.debug("process camera-{}, img: {}, intrinsics: {}, extrinsics: {}, msk: {}".format(idx, image.shape, intrin.shape, extrin, msk.shape))

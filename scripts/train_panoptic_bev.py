@@ -31,14 +31,16 @@ from panoptic_bev.algos.detection import PredictionGenerator as BbxPredictionGen
 from panoptic_bev.algos.semantic_seg import SemanticSegLoss, SemanticSegAlgo
 from panoptic_bev.algos.po_fusion import PanopticLoss, PanopticFusionAlgo
 
-from panoptic_bev.utils import plogging
 from panoptic_bev.utils.meters import AverageMeter, ConfusionMatrixMeter, ConstantMeter
 from panoptic_bev.utils.misc import config_to_string, scheduler_from_config, norm_act_from_config, all_reduce_losses
 from panoptic_bev.utils.parallel import DistributedDataParallel
 from panoptic_bev.utils.snapshot import save_snapshot, resume_from_snapshot, pre_train_from_snapshots
 from panoptic_bev.utils.sequence import pad_packed_images
 from panoptic_bev.utils.panoptic import compute_panoptic_test_metrics, panoptic_post_processing, get_panoptic_scores
-
+from panoptic_bev.utils.ValidMask import ValidMask
+from panoptic_bev.utils.BevVisualizer import BevVisualizer
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 parser = argparse.ArgumentParser(description="Panoptic BEV Training Script")
 parser.add_argument("--local_rank", required=True, type=int)
@@ -105,6 +107,7 @@ def create_run_directories(args, rank):
         raise RuntimeError("Invalid choice. --mode must be either 'train' or 'test'")
     saved_models_dir = os.path.join(run_dir, "saved_models")
     log_dir = os.path.join(run_dir, "logs")
+    vis_dir = os.path.join(run_dir, "vis")
     config_file = os.path.join(run_dir, args.config)
 
     # Create the directory
@@ -117,13 +120,14 @@ def create_run_directories(args, rank):
         os.mkdir(run_dir)
         os.mkdir(saved_models_dir)
         os.mkdir(log_dir)
+        os.mkdir(vis_dir)
 
     # Copy the config file into the folder
     config_path = os.path.join(experiment_dir, "config", args.config)
     if rank == 0:
         shutil.copyfile(config_path, config_file)
 
-    return log_dir, saved_models_dir, config_path
+    return log_dir, saved_models_dir, config_path, vis_dir
 
 
 def make_dataloader(args, config, rank, world_size):
@@ -131,6 +135,10 @@ def make_dataloader(args, config, rank, world_size):
 
     log_info("Creating train dataloader for {} dataset".format(args.train_dataset), debug=args.debug)
     log_info("Creating val dataloader for {} dataset".format(args.val_dataset), debug=args.debug)
+    cam_config = config['cameras']
+    Z_out=int(dl_config.getstruct("bev_crop")[1] * dl_config.getfloat('scale'))
+    W_out=int(dl_config.getstruct('bev_crop')[0] * dl_config.getfloat('scale'))
+    valid_msk = ValidMask()
 
     # Train dataloaders
     train_tf = BEVTransform(shortest_size=dl_config.getint("shortest_size"),
@@ -152,6 +160,9 @@ def make_dataloader(args, config, rank, world_size):
     elif args.train_dataset == "nuScenes":
         train_db = BEVNuScenesDataset(seam_root_dir=args.seam_root_dir, dataset_root_dir=args.dataset_root_dir,
                                       split_name=dl_config['train_set'], transform=train_tf)
+        # set extrinsics and valid_msk into BEVNuScenesDataset
+        train_db.set_extrinsics(cam_config.getstruct('extrinsics'))
+        train_db.set_validmsk(valid_msk.generate(h=W_out, w=Z_out, fov_l=30, fov_r=30))                                    
 
     if not args.debug:
         train_sampler = DistributedARBatchSampler(train_db, dl_config.getint('train_batch_size'), world_size, rank, True)
@@ -181,6 +192,9 @@ def make_dataloader(args, config, rank, world_size):
     elif args.val_dataset == "nuScenes":
         val_db = BEVNuScenesDataset(seam_root_dir=args.seam_root_dir, dataset_root_dir=args.dataset_root_dir,
                                     split_name=dl_config['val_set'], transform=val_tf)
+        # set extrinsics and valid_msk into BEVNuScenesDataset
+        val_db.set_extrinsics(cam_config.getstruct('extrinsics'))
+        val_db.set_validmsk(valid_msk.generate(h=W_out, w=Z_out, fov_l=30, fov_r=30))                                    
 
     if not args.debug:
         val_sampler = DistributedARBatchSampler(val_db, dl_config.getint("val_batch_size"), world_size, rank, False)
@@ -424,7 +438,7 @@ def train(model, optimizer, scheduler, dataloader, meters, **varargs):
 
     for it, sample in enumerate(dataloader):
         sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
-        sample['calib'], _ = pad_packed_images(sample['calib'])
+        # sample['calib'], _ = pad_packed_images(sample['calib'])
 
         # Log the time
         time_meters['data_time'].update(torch.tensor(time.time() - data_time))
@@ -437,7 +451,7 @@ def train(model, optimizer, scheduler, dataloader, meters, **varargs):
         batch_time = time.time()
 
         # Run network
-        losses, results, stats = model(**sample, do_loss=True, do_prediction=False)
+        losses, results, stats = model(**sample, do_loss=True, do_prediction=False, multi_view=False)
         if not varargs['debug']:
             distributed.barrier()
 
@@ -484,6 +498,8 @@ def train(model, optimizer, scheduler, dataloader, meters, **varargs):
 
 
 def validate(model, dataloader, **varargs):
+    global g_bev_visualizer
+
     model.eval()
 
     if not varargs['debug']:
@@ -538,10 +554,15 @@ def validate(model, dataloader, **varargs):
             batch_time = time.time()
 
             # Run network
-            losses, results, stats = model(**sample, do_loss=True, do_prediction=True)
+            losses, results, stats = model(**sample, do_loss=True, do_prediction=True, multi_view=False)
 
             if not varargs['debug']:
                 distributed.barrier()
+
+            try: 
+                g_bev_visualizer.plot_bev(sample, it, results)
+            except Exception as e:
+                logger.e("save visualize error: {}".format(str(e)))
 
             losses = OrderedDict((k, v.mean()) for k, v in losses.items())
             losses["loss"] = sum(loss_weights[loss_name] * losses[loss_name] for loss_name in losses.keys())
@@ -631,6 +652,8 @@ def validate(model, dataloader, **varargs):
 
 
 def main(args):
+    global g_bev_visualizer
+
     if not args.debug:
         # Initialize multi-processing
         distributed.init_process_group(backend='nccl', init_method='env://')
@@ -644,7 +667,7 @@ def main(args):
 
     # Create directories
     if not args.debug:
-        log_dir, saved_models_dir, config_file = create_run_directories(args, rank)
+        log_dir, saved_models_dir, config_file, vis_dir = create_run_directories(args, rank)
     else:
         config_file = os.path.join(args.project_root_dir, "experiments", "config", args.config)
 
@@ -657,6 +680,8 @@ def main(args):
         summary = tensorboard.SummaryWriter(log_dir)
     else:
         summary = None
+
+    g_bev_visualizer = BevVisualizer(config, vis_dir, n_imgs=1)
 
     # Create dataloaders
     train_dataloader, val_dataloader = make_dataloader(args, config, rank, world_size)
