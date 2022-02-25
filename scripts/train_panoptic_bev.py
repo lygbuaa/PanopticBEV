@@ -45,6 +45,8 @@ logger = plogging.get_logger()
 
 parser = argparse.ArgumentParser(description="Panoptic BEV Training Script")
 parser.add_argument("--local_rank", required=True, type=int)
+parser.add_argument("--world_size", required=True, type=int)
+parser.add_argument("--rank", required=True, type=int)
 parser.add_argument("--run_name", required=True, type=str, help="Name of the run for creating the folders")
 parser.add_argument("--project_root_dir", required=True, type=str, help="The root directory of the project")
 parser.add_argument("--seam_root_dir", required=True, type=str, help="Seamless dataset directory")
@@ -67,8 +69,8 @@ def log_info(msg, *args, **kwargs):
     if "debug" in kwargs.keys():
         print(msg % args)
     else:
-        if distributed.get_rank() == 0:
-            plogging.get_logger().info(msg, *args, **kwargs)
+        # if distributed.get_rank() == 0:
+        plogging.get_logger().info(msg, *args, **kwargs)
 
 
 def log_miou(label, miou, classes):
@@ -662,9 +664,12 @@ def main(args):
 
     if not args.debug:
         # Initialize multi-processing
-        distributed.init_process_group(backend='nccl', init_method='env://')
+        # distributed.init_process_group(backend='nccl', init_method='env://')
+        rank = args.rank 
+        world_size = args.world_size
+        distributed.init_process_group(backend='nccl', init_method=None, world_size=args.world_size, rank=args.rank)
         device_id, device = args.local_rank, torch.device(args.local_rank)
-        rank, world_size = distributed.get_rank(), distributed.get_world_size()
+        # rank, world_size = distributed.get_rank(), distributed.get_world_size()
         torch.cuda.set_device(device_id)
     else:
         rank = 0
@@ -681,7 +686,7 @@ def main(args):
     config = make_config(args, config_file)
 
     # Initialize logging only for rank 0
-    if not args.debug and rank == 0:
+    if not args.debug:
         plogging.init(log_dir, "train" if args.mode == 'train' else "test")
         summary = tensorboard.SummaryWriter(log_dir)
     else:

@@ -50,7 +50,7 @@ class MultiScaleTransformerVF(nn.Module):
 
         for idx, (feat, transformer) in enumerate(zip(ms_feat, self.transformer_list)):
             bev_feat, vf_logits, v_region_logits, f_region_logits = transformer(feat, intrinsics, extrinsics, valid_msk)
-            logger.info("MultiScaleTransformerVF[{}] input: {}, output: {}".format(idx, feat.shape, bev_feat.shape))
+            # logger.info("MultiScaleTransformerVF[{}] input: {}, output: {}".format(idx, feat.shape, bev_feat.shape))
             del feat
 
             ms_feat_trans.append(bev_feat)

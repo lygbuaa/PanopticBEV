@@ -508,16 +508,16 @@ class EfficientDet(nn.Module):
         # logger.info("EfficientNet output p2: {}, p3: {}, p4: {}, p5: {}".format(p2.shape, p3.shape, p4.shape, p5.shape))
 
         features = (p2, p3, p4, p5)
-        # features = self.bifpn(features)
+        features = self.bifpn(features)
 
         # regression = self.regressor(features)
         # classification = self.classifier(features)
         # anchors = self.anchors(inputs, inputs.dtype)
 
-        # return features  #, regression, classification, anchors
+        return features  #, regression, classification, anchors
 
-        _, p4_out, p5_out, p6_out, p7_out = self.bifpn(features)
-        return p4_out, p5_out, p6_out, p7_out
+        # _, p4_out, p5_out, p6_out, p7_out = self.bifpn(features)
+        # return p4_out, p5_out, p6_out, p7_out
 
     def init_backbone(self, path):
         state_dict = torch.load(path)

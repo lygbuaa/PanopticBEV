@@ -188,8 +188,8 @@ class PanopticBevNet(nn.Module):
             #     debug_str += tmp_str
             # logger.debug(debug_str)
 
-            ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, calib)
-            # ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = checkpoint.checkpoint(self.transformer, ms_feat, calib)
+            # ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, calib)
+            ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = checkpoint.checkpoint(self.transformer, ms_feat, calib)
             del img, ms_feat
             # debug_str = " ms_bev: "
             # for i, f in enumerate(ms_bev):
