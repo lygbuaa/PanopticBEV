@@ -39,6 +39,7 @@ from panoptic_bev.utils.sequence import pad_packed_images
 from panoptic_bev.utils.panoptic import compute_panoptic_test_metrics, panoptic_post_processing, get_panoptic_scores
 from panoptic_bev.utils.ValidMask import ValidMask
 from panoptic_bev.utils.BevVisualizer import BevVisualizer
+import torch.utils.checkpoint as checkpoint
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 
@@ -170,13 +171,13 @@ def make_dataloader(args, config, rank, world_size):
                                                batch_sampler=train_sampler,
                                                collate_fn=iss_collate_fn,
                                                pin_memory=True,
-                                               num_workers=dl_config.getint("train_workers"))
+                                               num_workers=1)#dl_config.getint("train_workers"))
     else:
         train_dl = torch.utils.data.DataLoader(train_db,
                                                batch_size=dl_config.getint('train_batch_size'),
                                                collate_fn=iss_collate_fn,
                                                pin_memory=True,
-                                               num_workers=dl_config.getint("train_workers"))
+                                               num_workers=1)#dl_config.getint("train_workers"))
 
     # Validation datalaader
     val_tf = BEVTransform(shortest_size=dl_config.getint("shortest_size"),
@@ -437,6 +438,8 @@ def train(model, optimizer, scheduler, dataloader, meters, **varargs):
     data_time = time.time()
 
     for it, sample in enumerate(dataloader):
+        if it > 20:
+            break
         sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
         # sample['calib'], _ = pad_packed_images(sample['calib'])
 
@@ -543,12 +546,14 @@ def validate(model, dataloader, **varargs):
     data_time = time.time()
 
     for it, sample in enumerate(dataloader):
+        if it > 20:
+            break
         batch_sizes = [m.shape[-2:] for m in sample['bev_msk']]
         original_sizes = sample['size']
         idxs = sample['idx']
         with torch.no_grad():
             sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
-            sample['calib'], _ = pad_packed_images(sample['calib'])
+            # sample['calib'], _ = pad_packed_images(sample['calib'])
 
             time_meters['data_time'].update(torch.tensor(time.time() - data_time))
             batch_time = time.time()
@@ -559,10 +564,11 @@ def validate(model, dataloader, **varargs):
             if not varargs['debug']:
                 distributed.barrier()
 
-            try: 
-                g_bev_visualizer.plot_bev(sample, it, results)
-            except Exception as e:
-                logger.e("save visualize error: {}".format(str(e)))
+            if it % 400 == 0:
+                try: 
+                    g_bev_visualizer.plot_bev(sample, it, results)
+                except Exception as e:
+                    logger.e("save visualize error: {}".format(str(e)))
 
             losses = OrderedDict((k, v.mean()) for k, v in losses.items())
             losses["loss"] = sum(loss_weights[loss_name] * losses[loss_name] for loss_name in losses.keys())

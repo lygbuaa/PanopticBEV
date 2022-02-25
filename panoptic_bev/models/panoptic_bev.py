@@ -179,11 +179,23 @@ class PanopticBevNet(nn.Module):
         if not multi_view:
             calib, _ = pad_packed_images(calib)
             img, _ = pad_packed_images(img)
-            ms_feat = self.body(img)
+            # ms_feat = self.body(img)
+            ms_feat = checkpoint.checkpoint(self.body, img)
+
+            # debug_str = "ms_feat: "
+            # for i, f in enumerate(ms_feat):
+            #     tmp_str = " {}-{},".format(i, f.shape)
+            #     debug_str += tmp_str
+            # logger.debug(debug_str)
+
             ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, calib)
-            # ms_feat = checkpoint.checkpoint(self.body, img)
             # ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = checkpoint.checkpoint(self.transformer, ms_feat, calib)
-            del ms_feat
+            del img, ms_feat
+            # debug_str = " ms_bev: "
+            # for i, f in enumerate(ms_bev):
+            #     tmp_str = " {}-{},".format(i, f.shape)
+            #     debug_str += tmp_str
+            # logger.debug(debug_str)
         else:
             for idx, (image, intrin, extrin, msk) in enumerate(zip(img[0], calib[0], extrinsics[0], valid_msk[0])):
                 logger.debug("process camera-{}, img: {}, intrinsics: {}, extrinsics: {}, msk: {}".format(idx, image.shape, intrin.shape, extrin, msk.shape))
@@ -203,15 +215,6 @@ class PanopticBevNet(nn.Module):
 
                 del ms_feat, ms_bev_tmp
 
-        # debug_str = "ms_feat: "
-        # for i, f in enumerate(ms_feat):
-        #     tmp_str = " {}-{},".format(i, f.shape)
-        #     debug_str += tmp_str
-        # debug_str += " ms_bev: "
-        # for i, f in enumerate(ms_bev):
-        #     tmp_str = " {}-{},".format(i, f.shape)
-        #     debug_str += tmp_str
-        # logger.debug(debug_str)
 
         if do_loss:
             vf_loss, v_region_loss, f_region_loss = self.transformer_algo.training(vf_logits_list, v_region_logits_list,

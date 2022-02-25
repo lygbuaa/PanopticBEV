@@ -46,6 +46,7 @@ class VerticalTransformer(nn.Module):
         # Fixed dummy convolutions to prevent ABNSync from crashing on backward()
         self.depth_extender_dummy = nn.Conv3d(Z_out, Z_out, 1, padding=0, bias=False)
         self.depth_estimation_dummy = nn.Conv2d(Z_out, Z_out, 1, padding=0, bias=False)
+        logger.info("init VerticalTransformer, H_in: {}, self.Z_out: {}".format(H_in, self.Z_out))
 
     def forward(self, v_feat, intrinsics, extrinsics=None):
         
@@ -91,6 +92,7 @@ class ErrorCorrectionModule(nn.Module):
         self.bottleneck_conv = nn.Conv2d(int(f_2d_ch), int(f_2d_ch), 3, padding=1, bias=False)
         self.feat_expand = nn.Conv2d(int(f_2d_ch), int(Z_out), 3, padding=1, bias=False)
         self.bev_conv = nn.Conv2d(int(f_2d_ch), int(f_2d_ch), 3, padding=1, bias=False)
+        logger.info("init ErrorCorrectionModule, H_in: {}, Z_out: {}".format(H_in, Z_out))
 
     def forward(self, f_feat):
         B, C, _, W = f_feat.shape
@@ -145,6 +147,7 @@ class FlatTransformer(nn.Module):
         self.f_dummy = nn.Conv2d(f_2d_ch, f_2d_ch, 1, bias=False)
 
         self.warper = Perspective2OrthographicWarper(extents, img_scale, resolution)
+        logger.info("init FlatTransformer, output: {}".format((int(self.Z_out), int(self.W_out))))
 
     def forward(self, feat, intrinsics, extrinsics=None):
         feat = self.f_dummy(self.ch_mapper_in(feat))
@@ -302,6 +305,7 @@ class TransformerVF(nn.Module):
 
         # Placeholder to prevent ABNSync from crashing on backward()
         self.dummy = nn.Conv2d(out_ch, out_ch, 1, padding=0, bias=False)
+        logger.info("TransformerVF init, scale: {}, extents: {}, input: {}, output: {}".format(img_scale, extents, (H_in, W_in), (Z_out, W_out)))
 
 
     def forward(self, feat, intrinsics, extrinsics=None, valid_msk=None):
@@ -323,6 +327,7 @@ class TransformerVF(nn.Module):
         # Perform the transformations on vertical and flat regions of the image plane feature map
         feat_v, v_region_logits = self.v_transform(feat_v, intrinsics, extrinsics=None)
         feat_f, f_region_logits = self.f_transform(feat_f, intrinsics, extrinsics=None)
+        # logger.info("v_transform output feat_v: {}, f_transform output feat_f: {}".format(feat_v.shape, feat_f.shape))
 
         # Resize the feature maps to the output size
         # This takes into account the extreme cases where one dimension is a few pixels short
@@ -332,7 +337,7 @@ class TransformerVF(nn.Module):
         # Merge the vertical and flat transforms
         feat_merged = self.merge_feat_vf(feat_v, feat_f)
         feat_merged = self.dummy(self.ch_mapper_out(feat_merged))
-        # logger.debug("feat_v: {}, feat_f: {}, feat_merged: {}".format(feat_v.shape, feat_f.shape, feat_merged.shape))
+        # logger.debug("interpolate output feat_v: {}, feat_f: {}, feat_merged: {}".format(feat_v.shape, feat_f.shape, feat_merged.shape))
 
         del feat_v, feat_f
 

@@ -9,7 +9,8 @@ from panoptic_bev.models.backbone_edet.efficientnet import EfficientNet as EffNe
 from panoptic_bev.models.backbone_edet.efficientnet_utils import MemoryEfficientSwish, Swish
 from panoptic_bev.models.backbone_edet.efficientnet_utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
 from panoptic_bev.models.backbone_edet.efficientdet_utils import Anchors, load_pretrained_weights
-
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 def nms(dets, thresh):
     return nms_torch(dets[:, :4], dets[:, 4], thresh)
@@ -283,6 +284,8 @@ class BiFPN(nn.Module):
         # Connections for P7_0 and P6_2 to P7_2
         p7_out = self.conv7_down(self.swish(weight[0] * p7_in + weight[1] * self.p7_downsample(p6_out)))
 
+        # logger.info("BiFPN output p3: {}, p4: {}, p5: {}, p6: {}, p7: {}".format(p3_out.shape, p4_out.shape, p5_out.shape, p6_out.shape, p7_out.shape))
+
         return p3_out, p4_out, p5_out, p6_out, p7_out
 
     def _forward(self, inputs):
@@ -502,15 +505,19 @@ class EfficientDet(nn.Module):
         max_size = inputs.shape[-1]
 
         p2, p3, p4, p5 = self.backbone_net(inputs)
+        # logger.info("EfficientNet output p2: {}, p3: {}, p4: {}, p5: {}".format(p2.shape, p3.shape, p4.shape, p5.shape))
 
         features = (p2, p3, p4, p5)
-        features = self.bifpn(features)
+        # features = self.bifpn(features)
 
         # regression = self.regressor(features)
         # classification = self.classifier(features)
         # anchors = self.anchors(inputs, inputs.dtype)
 
-        return features  #, regression, classification, anchors
+        # return features  #, regression, classification, anchors
+
+        _, p4_out, p5_out, p6_out, p7_out = self.bifpn(features)
+        return p4_out, p5_out, p6_out, p7_out
 
     def init_backbone(self, path):
         state_dict = torch.load(path)
@@ -541,6 +548,7 @@ class EfficientNet(nn.Module):
         x = self.model._bn0(x)
         x = self.model._swish(x)
         feature_maps = []
+        # logger.info("EfficientNet blocks: {}".format(len(self.model._blocks)))
 
         # TODO: temporarily storing extra tensor last_x and del it later might not be a good idea,
         #  try recording stride changing when creating efficientnet,
@@ -554,8 +562,10 @@ class EfficientNet(nn.Module):
 
             if block._depthwise_conv.stride == [2, 2]:
                 feature_maps.append(last_x)
+                # logger.info("EfficientNet append feature[{}]: {}".format(idx, last_x.shape))
             elif idx == len(self.model._blocks) - 1:
                 feature_maps.append(x)
+                # logger.info("EfficientNet append last feature[{}]: {}".format(idx, x.shape))
             last_x = x
         del last_x
         return feature_maps[1:]

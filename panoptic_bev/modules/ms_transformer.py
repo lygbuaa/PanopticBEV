@@ -3,6 +3,8 @@ import torch.nn as nn
 from inplace_abn import ABN
 
 from panoptic_bev.modules.transformer import TransformerVF
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 
 class MultiScaleTransformerVF(nn.Module):
@@ -17,6 +19,7 @@ class MultiScaleTransformerVF(nn.Module):
         self.transformer_list = nn.ModuleList()
 
         for scale_idx, scale in enumerate(tfm_scales):
+            logger.info("create TransformerVF input: {}, output: {}, scale: {}".format((H_in, W_in), (Z_out, W_out), scale))
             if use_init_theta:
                 transformer = TransformerVF(in_ch, tfm_ch, out_ch, extrinsics, bev_params,
                                             H_in=H_in, W_in=W_in, Z_out=Z_out, W_out=W_out, img_scale=1/scale,
@@ -47,6 +50,7 @@ class MultiScaleTransformerVF(nn.Module):
 
         for idx, (feat, transformer) in enumerate(zip(ms_feat, self.transformer_list)):
             bev_feat, vf_logits, v_region_logits, f_region_logits = transformer(feat, intrinsics, extrinsics, valid_msk)
+            logger.info("MultiScaleTransformerVF[{}] input: {}, output: {}".format(idx, feat.shape, bev_feat.shape))
             del feat
 
             ms_feat_trans.append(bev_feat)
