@@ -265,7 +265,7 @@ class BEVNuScenesDataset(data.Dataset):
         calib = img_desc['cam_intrinsic']
 
         # logger.debug(("dataset.py load img_file: {}, bev_msk_file: {}, vf_msk_file: {}, weights_msk_file: {}").format(img_file, bev_msk_file, vf_msk_file, weights_msk_file))
-        # logger.debug("dataset.py img_desc: {}".format(img_desc))
+        logger.debug("dataset.py img_desc: {}".format(img_desc))
 
         return img, bev_msk, vf_msk, weights_msk_combined, cat, iscrowd, calib, img_desc["id"]
 

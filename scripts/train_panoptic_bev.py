@@ -678,7 +678,7 @@ def main(args):
 
     # Create directories
     if not args.debug:
-        log_dir, saved_models_dir, config_file, vis_dir = create_run_directories(args, rank)
+        log_dir, saved_models_dir, config_file, vis_dir = create_run_directories(args, rank=0)
     else:
         config_file = os.path.join(args.project_root_dir, "experiments", "config", args.config)
 

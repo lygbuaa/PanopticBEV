@@ -1,7 +1,7 @@
 CUDA_VISIBLE_DEVICES=0 \
 python3 -m torch.distributed.launch --nproc_per_node=1 --master_addr="10.11.10.144" --master_port="30000" train_panoptic_bev.py \
                                     --local_rank=0 \
-                                    --world_size=1 \
+                                    --world_size=2 \
                                     --rank=0 \
                                     --run_name='train_panoptic_bev' \
                                     --project_root_dir="/home/hugoliu/github/PanopticBEV" \
