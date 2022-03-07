@@ -263,8 +263,8 @@ class BEVNuScenesDatasetV2(data.Dataset):
 
         # img: list of torch.tensor, calib: list of torch.tensor, extrinsics: list of dict, valid_msk: list of np.array
         rec = dict(img=torch.stack(img_list, dim=0), calib=torch.stack(intrinsics_list, dim=0), 
-                extrinsics=torch.stack(extrinsics_list, dim=0), valid_msk=torch.stack(valid_msk_list, dim=0),
-                bev_msk=None, front_msk=None, weights_msk=None, cat=None, iscrowd=None, bbx=None, idx=index, size=size)
+                extrinsics=torch.stack(extrinsics_list, dim=0), valid_msk=torch.stack(valid_msk_list, dim=0))
+                #bev_msk=None, front_msk=None, weights_msk=None, cat=None, iscrowd=None, bbx=None, idx=index, size=size)
         # logger.debug("load data-{}, img: {}, intrinsics: {}, extrinsics: {}, valid_msk: {}".format(index, len(img_list), intrinsics_list, extrinsics_list, len(valid_msk_list)))
         logger.debug("getitem-{}, img: {}, intrin: {}, extrin: {}, msk: {}".format(index, rec["img"].shape, rec["calib"].shape, rec["extrinsics"].shape, rec["valid_msk"].shape))
         return rec

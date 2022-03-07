@@ -157,7 +157,8 @@ class FlatTransformer(nn.Module):
                                               self.img_scale, self.out_img_size_reverse).view(-1, 3, 3).to(feat.device)
             theta_ipm_list.append(theta_ipm_i)
         theta_ipm = torch.cat(theta_ipm_list, dim=0)
-        feat_bev_ipm = warp_perspective(feat, theta_ipm, (int(self.Z_out), int(self.W_out)))
+        # print("feat device: {}, theta_ipm device: {}".format(feat.device, theta_ipm.device))
+        feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=(int(self.Z_out), int(self.W_out)), fill_value=torch.zeros(3, device=feat.device))
         feat_bev_ipm = torch.rot90(feat_bev_ipm, k=2, dims=[2, 3])
 
         # Find the regions where IPM goes wrong and apply the ECN to those regions
@@ -166,7 +167,7 @@ class FlatTransformer(nn.Module):
 
         # Convert the incorrect mask back into the FV and use it to get the erroneous features in the FV
         ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
-        ipm_incorrect_fv = warp_perspective(ipm_incorrect, torch.inverse(theta_ipm), (feat.shape[2], feat.shape[3]))
+        ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=(feat.shape[2], feat.shape[3]), fill_value=torch.zeros(3, device=feat.device))
         feat_ecm_fv = (feat * ipm_incorrect_fv)
 
         # Add the regions that are ignored by the IPM algorithm --> Regions above the principal point.
@@ -343,29 +344,29 @@ class TransformerVF(nn.Module):
         f_region_logits = torch.rot90(f_region_logits, k=1, dims=[2, 3])
 
         # make sure it's eval process, not training
-        if valid_msk is not None:
-            #filter with valid_msk, maybe optional
-            # logger.debug("feat_merged: {}".format(feat_merged.shape))
-            N, C, H, W = feat_merged.shape
-            msk_t = valid_msk.unsqueeze(0).unsqueeze(0)
-            msk_t = F.interpolate(msk_t, (H, W), mode="nearest")
-            feat_merged = torch.mul(feat_merged, msk_t)
-            # double bev size, padding on last dim, left_side
-            feat_merged = F.pad(feat_merged, (W, 0), mode="constant", value=0)
+        # if valid_msk is not None:
+        #filter with valid_msk, maybe optional
+        # logger.debug("feat_merged: {}".format(feat_merged.shape))
+        N, C, H, W = feat_merged.shape
+        msk_t = valid_msk.unsqueeze(0).unsqueeze(0)
+        msk_t = F.interpolate(msk_t, (H, W), mode="nearest")
+        feat_merged = torch.mul(feat_merged, msk_t)
+        # double bev size, padding on last dim, left_side
+        feat_merged = F.pad(feat_merged, (W, 0), mode="constant", value=0)
 
         # feature affine
-        if extrinsics is not None:
-            ccw_angle = extrinsics[1][0]
-            # if keep bev output as [896, 768]
-            # tx = -1.0 - extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out
-            # ty = 0.0 + extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
-            # if double bev output to [896, 768*2]
-            tx = -1 * extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out/2
-            ty = extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
-            feat_merged = self.feat_affine(feat_merged, angle=ccw_angle, tx=tx, ty=ty)
-            # v_region_logits & f_region_logits are useless in prediction
-            # v_region_logits = self.feat_affine(v_region_logits, angle=0.0, tx=0, ty=0)
-            # f_region_logits = self.feat_affine(f_region_logits, angle=0.0, tx=0, ty=0)
+        # if extrinsics is not None:
+        ccw_angle = extrinsics[1][0]
+        # if keep bev output as [896, 768]
+        # tx = -1.0 - extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out
+        # ty = 0.0 + extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
+        # if double bev output to [896, 768*2]
+        tx = -1 * extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out/2
+        ty = extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
+        feat_merged = self.feat_affine(feat_merged, angle=ccw_angle, tx=tx, ty=ty)
+        # v_region_logits & f_region_logits are useless in prediction
+        # v_region_logits = self.feat_affine(v_region_logits, angle=0.0, tx=0, ty=0)
+        # f_region_logits = self.feat_affine(f_region_logits, angle=0.0, tx=0, ty=0)
         # else:
         #     feat_merged = self.feat_affine(feat_merged, angle=0.0, tx=0.0, ty=-1.0)
 

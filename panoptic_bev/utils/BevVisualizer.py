@@ -98,8 +98,9 @@ class BevVisualizer(object):
             (NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             torchvision.transforms.ToPILImage(),)
         )
-        input_images = inputs["img"].cpu().contiguous[0]
-        # logger.debug("input img: {}".format(input_images.shape))
+        # input_images = inputs["img"].cpu().contiguous[0]
+        input_images = inputs["img"].cpu()[0]
+        logger.debug("input img: {}".format(input_images.shape))
 
         if self.N == 1:
             ax = plt.subplot(gs[0, 1])
@@ -141,14 +142,19 @@ class BevVisualizer(object):
 
         # plot bev results, cat-idx must be retrieved from po_class vector
         if show_po:
-            bev_seg_po = bev_pred['po_pred'].cpu().contiguous[0]
+            # bev_seg_po = bev_pred['po_pred'].cpu().contiguous[0]
+            bev_seg_po = bev_pred['po_pred'].cpu()
             # logger.debug("bev_seg_po shape: {}".format(bev_seg_po.shape))
         else:
-            bev_seg = bev_pred['sem_pred'].cpu().contiguous[0]
+            # bev_seg = bev_pred['sem_pred'].cpu().contiguous[0]
+            bev_seg = bev_pred['sem_pred'].cpu()
             # logger.debug("bev_seg shape: {}".format(bev_seg.shape))
-        seg_cls = bev_pred['po_class'].cpu().contiguous[0].numpy()
-        bbx_pred = bev_pred['bbx_pred'].cpu().contiguous[0]
-        cls_pred = bev_pred['cls_pred'].cpu().contiguous[0]
+        # seg_cls = bev_pred['po_class'].cpu().contiguous[0].numpy()
+        seg_cls = bev_pred['po_class'].cpu().numpy()
+        # bbx_pred = bev_pred['bbx_pred'].cpu().contiguous[0]
+        bbx_pred = bev_pred['bbx_pred'].cpu()
+        # cls_pred = bev_pred['cls_pred'].cpu().contiguous[0]
+        cls_pred = bev_pred['cls_pred'].cpu()
         # logger.debug("seg_cls: {}, bbx_pred: {}".format(seg_cls.shape, bbx_pred.shape))
 
         if show_po:
