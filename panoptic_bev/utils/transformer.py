@@ -1,6 +1,7 @@
 import torch
 import numpy as np
-
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 def compute_M(scale, image_size, bev_focal_length, bev_camera_z):
     """ image_size --> (H, W) """
@@ -49,6 +50,8 @@ def compute_extrinsic_matrix(translation, rotation):
     extrinsic = np.zeros((3, 4), dtype=np.float)
     extrinsic[:3, :3] = R[:3, :3]
     extrinsic[:, 3] = t_rot.squeeze(1)
+
+    logger.debug("translation: {}, rotataion: {}, R_x: {}, R_y: {}, R_z: {}, R: {}, t_rot: {}, extrinsc: {}".format(translation, rotation, R_x, R_y, R_z, R, t_rot, extrinsic))
 
     return extrinsic
 

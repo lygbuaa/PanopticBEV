@@ -229,15 +229,20 @@ def make_model(args, config, num_thing, num_stuff):
                      "bifpn.0.p5_down_channel", "bifpn.0.p6_down_channel"]
     body = EfficientDet.from_pretrained(body, model_name, ignore_layers=ignore_layers)
 
+    # body_ts = torch.jit.script(body)
+    # torch.jit.save(body_ts, "./body_ts.pt")
+
     # The transformer operates only on a single scale
     extrinsics = cam_config.getstruct('extrinsics')
+    extrinsics_t = torch.tensor([extrinsics["translation"], extrinsics["rotation"]], dtype=torch.float)
+    # logger.debug("extrinsics_t: {}-{}".format(extrinsics_t[0], extrinsics_t[1]))
     bev_params = cam_config.getstruct('bev_params')
     tfm_scales = transformer_config.getstruct("tfm_scales")
 
     bev_transformer = MultiScaleTransformerVF(transformer_config.getint("in_channels"),
                                               transformer_config.getint("tfm_channels"),
                                               transformer_config.getint("bev_ms_channels"),
-                                              extrinsics, bev_params,
+                                              extrinsics_t, bev_params,
                                               H_in=dl_config.getstruct("front_resize")[0] * dl_config.getfloat("scale"),
                                               W_in=dl_config.getstruct('front_resize')[1] * dl_config.getfloat('scale'),
                                               Z_out=dl_config.getstruct("bev_crop")[1] * dl_config.getfloat('scale'),
@@ -272,15 +277,16 @@ def make_model(args, config, num_thing, num_stuff):
                                                       roi_config.getfloat("score_threshold"),
                                                       roi_config.getint("max_predictions"),
                                                       dataset_name=args.test_dataset)
-    msk_prediction_generator = MskPredictionGenerator()
+    msk_prediction_generator = None #MskPredictionGenerator()
     roi_size = roi_config.getstruct("roi_size")
-    proposal_matcher = ProposalMatcher(classes,
-                                       roi_config.getint("num_samples"),
-                                       roi_config.getfloat("pos_ratio"),
-                                       roi_config.getfloat("pos_threshold"),
-                                       roi_config.getfloat("neg_threshold_hi"),
-                                       roi_config.getfloat("neg_threshold_lo"),
-                                       roi_config.getfloat("void_threshold"))
+    proposal_matcher = None
+            # ProposalMatcher(classes,
+            # roi_config.getint("num_samples"),
+            # roi_config.getfloat("pos_ratio"),
+            # roi_config.getfloat("pos_threshold"),
+            # roi_config.getfloat("neg_threshold_hi"),
+            # roi_config.getfloat("neg_threshold_lo"),
+            # roi_config.getfloat("void_threshold"))
     bbx_loss = None
     msk_loss = None
     lbl_roi_size = tuple(s * 2 for s in roi_size)
@@ -295,7 +301,6 @@ def make_model(args, config, num_thing, num_stuff):
     Z_out = int(dl_config.getstruct("bev_crop")[1] * dl_config.getfloat("scale"))
     out_shape = (W_out, Z_out)
     sem_loss = None
-    sem_algo = SemanticSegAlgo(sem_loss, classes["total"])
     sem_head = FPNSemanticHeadDPC(transformer_config.getint("bev_ms_channels"),
                                   sem_config.getint("fpn_min_level"),
                                   sem_config.getint("fpn_levels"),
@@ -303,6 +308,7 @@ def make_model(args, config, num_thing, num_stuff):
                                   out_size=out_shape,
                                   pooling_size=sem_config.getstruct("pooling_size"),
                                   norm_act=norm_act_static)
+    sem_algo = SemanticSegAlgo(sem_head, sem_loss, classes["total"])
 
     # Panoptic fusion algorithm
     po_loss = None
@@ -393,8 +399,8 @@ def test(model, dataloader, **varargs):
     global g_bev_visualizer
 
     fuser = FuseConvBn()
-    fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
-    fuser.do_bn_fusion_v2(model, bn_name="InPlaceABNSync")
+    # fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
+    # fuser.do_bn_fusion_v2(model, bn_name="InPlaceABNSync")
     # logger.info("final model after fusion: {}".format(model))
 
     model.eval()
@@ -438,7 +444,7 @@ def test(model, dataloader, **varargs):
 
     for it, sample in enumerate(dataloader):
         # eval with front-100 images
-        if it > 10:
+        if it > 2:
             break
 
         do_loss=False
@@ -461,12 +467,13 @@ def test(model, dataloader, **varargs):
             # results = model(**sample)
             logger.info("inputs img: {}, calib: {}, extrinsics: {}, valid_msk: {}".format(sample["img"].shape, sample["calib"].shape, sample["extrinsics"].shape, sample["valid_msk"].shape))
             inputs = (sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
-            # results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+            results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+            # break
 
-            model_ts = torch.jit.trace(model, inputs, check_trace=False, strict=False)
-            torch.jit.save(model_ts, "./panoptic_bev_gpu.pt")
-            logger.info("torchscript model saved to ./panoptic_bev_gpu.pt")
-            break
+            # model_ts = torch.jit.trace(model, inputs, check_trace=False, strict=False)
+            # torch.jit.save(model_ts, "./panoptic_bev_gpu.pt")
+            # logger.info("torchscript model saved to ./panoptic_bev_gpu.pt")
+            # break
 
             # macs, params = profile(model, inputs)
             # logger.info("thop profile, macs: {}, params: {}".format(macs, params))
@@ -474,8 +481,8 @@ def test(model, dataloader, **varargs):
             if not varargs['debug']:
                 distributed.barrier()
 
-            g_bev_visualizer.plot_bev(sample, it, results)
-            break
+            g_bev_visualizer.plot_bev(sample, it, results, show_po=True)
+            # break
             # for idx, (path, submodule) in enumerate(model.named_modules()):
             #     logger.info("named_modules-{} - {} - {}: {}".format(idx, path, submodule.__class__.__name__, submodule))
             # break            
@@ -569,6 +576,7 @@ def main(args):
         assert not args.pre_train, "resume and pre_train are mutually exclusive"
         log_info("Loading snapshot from %s", args.resume, debug=args.debug)
         snapshot = resume_from_snapshot(model, args.resume, ["body", "transformer", "rpn_head", "roi_head", "sem_head"])
+        # snapshot = resume_from_snapshot(model, args.resume, ["transformer", "rpn_head", "roi_head", "sem_head"])
     elif args.pre_train:
         assert not args.resume, "resume and pre_train are mutually exclusive"
         log_info("Loading pre-trained model from %s", args.pre_train, debug=args.debug)

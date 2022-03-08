@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
 from panoptic_bev.utils.parallel import PackedSequence
-
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 class PanopticLoss:
     """Semantic segmentation loss
@@ -45,7 +46,6 @@ class PanopticLoss:
             po_loss.append(po_loss_i.mean())
 
         return sum(po_loss) / len(po_logits)
-
 
 class PanopticFusionAlgo:
     def __init__(self, loss, num_stuff, num_thing, sem_stride, min_stuff_area=0):
@@ -212,37 +212,6 @@ class PanopticFusionAlgo:
             po_iscrowd.append(torch.tensor(po_iscrowd_i))
 
         return po_pred_seamless, po_cls, po_iscrowd
-
-    def training(self, sem_logits, roi_msk_logits, bbx, cat, po_gt, img_size):
-        # During training cat has the GT instance labels, i.e, they have thing labels, i.e, [num_stuff, num_stuff + num_thing)
-        # Get the roi mask containing the GT
-        msk_logits = []
-        for roi_msk_logits_i, cat_i in zip(roi_msk_logits, cat):
-            if roi_msk_logits_i is None:
-                msk_logits.append(None)
-            else:
-                msk_logits_i = torch.cat([roi_msk_logits_i[idx, cat_i[idx] - self.num_stuff, :, :].unsqueeze(0)
-                                          for idx in range(roi_msk_logits_i.shape[0])], dim=0)
-                msk_logits.append(msk_logits_i)
-
-        po_logits_stuff, po_logits_inst = self._process_semantic_logits(sem_logits, bbx, cat)
-        po_logits_mask = self.process_mask_logits(sem_logits, msk_logits, bbx, cat, img_size)
-
-        po_logits = []
-        for stuff_i, inst_i, mask_i in zip(po_logits_stuff, po_logits_inst, po_logits_mask):
-            if (inst_i is None) or (mask_i is None):
-                po_logits_i = stuff_i
-            else:
-                # inst_i = logit_scaling_head()
-                combined_inst_i = (inst_i.sigmoid() + mask_i.sigmoid()) * (inst_i + mask_i)
-                po_logits_i = torch.cat([stuff_i, combined_inst_i], dim=0)
-            po_logits.append(po_logits_i)
-        po_logits = PackedSequence(po_logits)
-
-        # Compute panoptic loss
-        po_loss = self.loss(po_logits, po_gt)
-
-        return po_loss
 
     def inference(self, sem_logits, roi_msk_logits, bbx, cls, img_size):
         # During inference, cls has instance classes starting from 0, i.e, from [0, num_thing)

@@ -8,7 +8,8 @@ from panoptic_bev.utils.bbx import ious, calculate_shift, mask_overlap, bbx_over
 from panoptic_bev.utils.misc import Empty
 from panoptic_bev.utils.nms import nms
 from panoptic_bev.utils.parallel import PackedSequence
-
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 CHUNK_SIZE = 16
 
 
@@ -89,6 +90,8 @@ class ProposalGenerator:
 
                 # NMS
                 idx = nms(bbx_i, obj_i, self.nms_threshold, num_post_nms)
+                logger.debug("ProposalGenerator bbx_i: {}, obj_i: {}, idx: {}, proposals len: {}".format(bbx_i.shape, obj_i.shape, idx.shape, len(proposals)))
+
                 if idx.numel() == 0:
                     raise Empty
                 bbx_i = bbx_i[idx]
@@ -96,7 +99,6 @@ class ProposalGenerator:
                 proposals.append(bbx_i)
             except Empty:
                 proposals.append(None)
-
         return PackedSequence(proposals)
 
 

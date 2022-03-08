@@ -1,11 +1,12 @@
 import torch.nn as nn
 from torch.nn import functional as F
-import torch, math
+import torch, math, sys
 # import kornia
-from kornia.geometry.transform import warp_perspective
+# from kornia.geometry.transform import warp_perspective
+from panoptic_bev.utils.kornia_geometry import warp_perspective
 from inplace_abn import ABN
 
-from panoptic_bev.utils.transformer import get_init_homography
+from panoptic_bev.utils.transformer_ts import get_init_homography
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 
@@ -115,7 +116,7 @@ class FlatTransformer(nn.Module):
         self.extrinsics = extrinsics
         self.bev_params = bev_params
         self.in_img_size = in_img_size
-        self.out_img_size_reverse = (out_img_size[1], out_img_size[0])  # (Z_out, W_out)
+        self.out_img_size_reverse = torch.tensor([out_img_size[1], out_img_size[0]])  # (Z_out, W_out)
         self.W_out = out_img_size[0] * img_scale
         self.Z_out = out_img_size[1] * img_scale
 
@@ -145,20 +146,17 @@ class FlatTransformer(nn.Module):
         self.f_dummy = nn.Conv2d(f_2d_ch, f_2d_ch, 1, bias=False)
 
         self.warper = Perspective2OrthographicWarper(extents, img_scale, resolution)
+        self.px_per_metre = torch.abs((bev_params['f'] * torch.tensor(img_scale)) / (bev_params['cam_z']))
+        # self.tmp_jit_path = "../jit/tmp_transformer.pt"
+        # self.jit_tmp_transformer = torch.jit.load(self.tmp_jit_path)
 
     def forward(self, feat, intrinsics, extrinsics=None):
         feat = self.f_dummy(self.ch_mapper_in(feat))
-        # Apply the IPM algorithm on the flat regions.
-        # We compute the homography using the known camera intrinsics and kornia applies the homography
-        theta_ipm_list = []
-        for b_idx in range(feat.shape[0]):
-            # be careful, self.extrinsics is dedicated to image-plane->bev-plane, which don't care about vehicle coordinate
-            theta_ipm_i = get_init_homography(intrinsics[b_idx].cpu().numpy(), self.extrinsics, self.bev_params,
-                                              self.img_scale, self.out_img_size_reverse).view(-1, 3, 3).to(feat.device)
-            theta_ipm_list.append(theta_ipm_i)
-        theta_ipm = torch.cat(theta_ipm_list, dim=0)
+        
+        theta_ipm = g_create_theta_ipm(intrinsics, self.extrinsics, self.px_per_metre, torch.tensor(self.img_scale), self.out_img_size_reverse, torch.tensor(feat.shape[0]))
         # print("feat device: {}, theta_ipm device: {}".format(feat.device, theta_ipm.device))
-        feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=(int(self.Z_out), int(self.W_out)), fill_value=torch.zeros(3, device=feat.device))
+        # feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]), fill_value=torch.zeros(3, device=feat.device))
+        feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
         feat_bev_ipm = torch.rot90(feat_bev_ipm, k=2, dims=[2, 3])
 
         # Find the regions where IPM goes wrong and apply the ECN to those regions
@@ -167,7 +165,9 @@ class FlatTransformer(nn.Module):
 
         # Convert the incorrect mask back into the FV and use it to get the erroneous features in the FV
         ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
-        ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=(feat.shape[2], feat.shape[3]), fill_value=torch.zeros(3, device=feat.device))
+        # ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]), fill_value=torch.zeros(3, device=feat.device))
+        ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
+        # ipm_incorrect_fv = kornia_warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]], dtype=torch.int), fill_value=torch.zeros(3, device=feat.device))
         feat_ecm_fv = (feat * ipm_incorrect_fv)
 
         # Add the regions that are ignored by the IPM algorithm --> Regions above the principal point.
@@ -185,10 +185,10 @@ class FlatTransformer(nn.Module):
 
         f_feat = feat_bev_ecm + feat_bev_ipm
         f_feat = f_feat + self.post_process_residual(f_feat)
-        f_logits = self.f_region_estimation(f_feat)
+        # f_logits = self.f_region_estimation(f_feat)
         f_feat = self.ch_mapper_out(f_feat)
 
-        return f_feat, f_logits
+        return f_feat #, f_logits
 
 
 class MergeFeaturesVF(nn.Module):
@@ -251,7 +251,7 @@ class Perspective2OrthographicWarper(nn.Module):
 
         # Resample 3D feature map
         grid_coords = torch.stack([ucoords, zcoords], -1).clamp(-1.1, 1.1)
-        return F.grid_sample(features, grid_coords)
+        return F.grid_sample(features, grid_coords, align_corners=False)
 
 
     def _make_grid(self, extents, resolution):
@@ -322,8 +322,8 @@ class TransformerVF(nn.Module):
         del v_att, f_att
 
         # Perform the transformations on vertical and flat regions of the image plane feature map
-        feat_v, v_region_logits = self.v_transform(feat_v, intrinsics, extrinsics=None)
-        feat_f, f_region_logits = self.f_transform(feat_f, intrinsics, extrinsics=None)
+        feat_v, _ = self.v_transform(feat_v, intrinsics, extrinsics=None)
+        feat_f = self.f_transform(feat_f, intrinsics, extrinsics=None)
 
         # Resize the feature maps to the output size
         # This takes into account the extreme cases where one dimension is a few pixels short
@@ -340,8 +340,8 @@ class TransformerVF(nn.Module):
         # In the merged features, the ego car is at the bottom and something far away is at the top.
         # Rotate it to match the output --> The ego car is on the left and something far away is towards the right
         feat_merged = torch.rot90(feat_merged, k=1, dims=[2, 3])
-        v_region_logits = torch.rot90(v_region_logits, k=1, dims=[2, 3])
-        f_region_logits = torch.rot90(f_region_logits, k=1, dims=[2, 3])
+        # v_region_logits = torch.rot90(v_region_logits, k=1, dims=[2, 3])
+        # f_region_logits = torch.rot90(f_region_logits, k=1, dims=[2, 3])
 
         # make sure it's eval process, not training
         # if valid_msk is not None:
@@ -363,18 +363,33 @@ class TransformerVF(nn.Module):
         # if double bev output to [896, 768*2]
         tx = -1 * extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out/2
         ty = extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
-        feat_merged = self.feat_affine(feat_merged, angle=ccw_angle, tx=tx, ty=ty)
+        feat_merged = feat_affine(feat_merged, angle=ccw_angle, tx=tx, ty=ty)
         # v_region_logits & f_region_logits are useless in prediction
         # v_region_logits = self.feat_affine(v_region_logits, angle=0.0, tx=0, ty=0)
         # f_region_logits = self.feat_affine(f_region_logits, angle=0.0, tx=0, ty=0)
         # else:
         #     feat_merged = self.feat_affine(feat_merged, angle=0.0, tx=0.0, ty=-1.0)
 
-        return feat_merged, vf_logits, v_region_logits, f_region_logits
+        return feat_merged #, vf_logits, v_region_logits, f_region_logits
 
+@torch.jit.script
+def feat_affine(feat, angle, tx, ty):
+    # angle = angle*math.pi/180.0
+    angle = torch.deg2rad(angle)
+    theta = torch.stack([torch.stack([torch.cos(angle), torch.sin(-angle), tx]),torch.stack([torch.sin(angle), torch.cos(angle), ty])], dim=0)
+    grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
+    return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False).to(feat.device)
 
-    def feat_affine(self, feat, angle=90.0, tx=0.0, ty=0.0):
-        angle = angle*math.pi/180.0
-        theta = torch.tensor([[math.cos(angle), math.sin(-angle), tx],[math.sin(angle), math.cos(angle), ty]], dtype=torch.float)
-        grid = F.affine_grid(theta.unsqueeze(0), feat.size()).to(feat.device)
-        return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros').to(feat.device)
+def g_create_theta_ipm(intrinsics, extrinsics, px_per_metre, img_scale, out_img_size_reverse, fshape=0):
+    # self.theta_ipm = torch.tensor([[[-2.1252e-02, -3.8398e-01,  2.5564e+01],
+    #                                 [ 1.8623e-09, -6.6520e-01,  4.3911e+01],
+    #                                 [ 2.1929e-14, -3.4299e-03,  2.0976e-01]]])
+    theta_ipm_list = []
+    for b_idx in range(fshape):
+        # be careful, self.extrinsics is dedicated to image-plane->bev-plane, which don't care about vehicle coordinate
+        theta_ipm_i = get_init_homography(intrinsics[b_idx], extrinsics, px_per_metre,
+                                            img_scale, out_img_size_reverse).view(-1, 3, 3).to(intrinsics.device)
+        theta_ipm_list.append(theta_ipm_i)
+        # logger.debug("b_idx: {}, intrinsics: {}, theta_ipm_i: {}".format(b_idx, intrinsics[b_idx], theta_ipm_i))
+    theta_ipm = torch.cat(theta_ipm_list, dim=0)
+    return theta_ipm

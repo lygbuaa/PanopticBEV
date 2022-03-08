@@ -41,18 +41,18 @@ class MultiScaleTransformerVF(nn.Module):
     def forward(self, ms_feat, intrinsics, extrinsics=None, valid_msk=None):
         # Run the multi-scale features from each camera
         ms_feat_trans = []
-        vf_logits_list = []
-        v_region_logits_list = []
-        f_region_logits_list = []
+        # vf_logits_list = []
+        # v_region_logits_list = []
+        # f_region_logits_list = []
 
         for idx, (feat, transformer) in enumerate(zip(ms_feat, self.transformer_list)):
-            bev_feat, vf_logits, v_region_logits, f_region_logits = transformer(feat, intrinsics, extrinsics, valid_msk)
+            bev_feat = transformer(feat, intrinsics, extrinsics, valid_msk)
             del feat
 
             ms_feat_trans.append(bev_feat)
-            vf_logits_list.append(vf_logits)
-            v_region_logits_list.append(v_region_logits)
-            f_region_logits_list.append(f_region_logits)
+            # vf_logits_list.append(vf_logits)
+            # v_region_logits_list.append(v_region_logits)
+            # f_region_logits_list.append(f_region_logits)
         del ms_feat
 
-        return ms_feat_trans, vf_logits_list, v_region_logits_list, f_region_logits_list,
+        return ms_feat_trans  #, vf_logits_list, v_region_logits_list, f_region_logits_list,

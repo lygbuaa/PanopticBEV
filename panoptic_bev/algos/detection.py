@@ -7,6 +7,8 @@ from panoptic_bev.utils.bbx import ious, calculate_shift, bbx_overlap, mask_over
 from panoptic_bev.utils.misc import Empty
 from panoptic_bev.utils.nms import nms
 from panoptic_bev.utils.parallel import PackedSequence
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 
 class PredictionGenerator:
@@ -66,83 +68,46 @@ class PredictionGenerator:
         for bbx_i, obj_i in zip(boxes, scores):
             try:
                 if bbx_i is None or obj_i is None:
+                    logger.debug("bbx_i or obj_i empty!")
                     raise Empty
 
-                if self.dataset_name == "nuScenes":
-                    # Class independent NMS
-                    bbx_all = bbx_i.reshape(-1, 4)
-                    scores_all = obj_i[:, 1:].reshape(-1)
-                    cls_all = torch.zeros(bbx_i.shape[0], bbx_i.shape[1], dtype=torch.long, device=bbx_i.device)
-                    for cls_id in range(bbx_i.shape[1]):
-                        cls_all[:, cls_id] = cls_id
-                    cls_all = cls_all.reshape(-1)
+                # Class independent NMS
+                bbx_all = bbx_i.reshape(-1, 4)
+                scores_all = obj_i[:, 1:].reshape(-1)
+                cls_all = torch.zeros(bbx_i.shape[0], bbx_i.shape[1], dtype=torch.long, device=bbx_i.device)
+                for cls_id in range(bbx_i.shape[1]):
+                    cls_all[:, cls_id] = cls_id
+                cls_all = cls_all.reshape(-1)
 
-                    # Filter out the low-scroing predictions
-                    idx = [scores_all > self.score_threshold]
-                    scores_all = scores_all[idx]
-                    bbx_all = bbx_all[idx]
-                    cls_all = cls_all[idx]
+                # Filter out the low-scroing predictions
+                idx = [scores_all > self.score_threshold]
+                scores_all = scores_all[idx]
+                bbx_all = bbx_all[idx]
+                cls_all = cls_all[idx]
 
-                    # Filter empty predictions
-                    idx = (bbx_all[:, 2] > bbx_all[:, 0]) & (bbx_all[:, 3] > bbx_all[:, 1])
-                    if not idx.any().item():
-                        continue
-                    bbx_all = bbx_all[idx]
-                    scores_all = scores_all[idx]
-                    cls_all = cls_all[idx]
+                # Filter empty predictions
+                idx = (bbx_all[:, 2] > bbx_all[:, 0]) & (bbx_all[:, 3] > bbx_all[:, 1])
+                if not idx.any().item():
+                    continue
+                bbx_all = bbx_all[idx]
+                scores_all = scores_all[idx]
+                cls_all = cls_all[idx]
 
-                    # Do NMS
-                    idx = nms(bbx_all.contiguous(), scores_all.contiguous(), threshold=self.nms_threshold, n_max=-1)
-                    if idx.numel() == 0:
-                        continue
-                    bbx_all = bbx_all[idx]
-                    scores_all = scores_all[idx]
-                    cls_all = cls_all[idx]
+                # Do NMS
+                idx = nms(bbx_all.contiguous(), scores_all.contiguous(), threshold=self.nms_threshold, n_max=-1)
+                if idx.numel() == 0:
+                    continue
+                bbx_all = bbx_all[idx]
+                scores_all = scores_all[idx]
+                cls_all = cls_all[idx]
 
-                    if bbx_all.shape[0] == 0:
-                        raise Empty
+                if bbx_all.shape[0] == 0:
+                    logger.debug("bbx_all empty!")
+                    raise Empty
 
-                    bbx_pred_i = bbx_all
-                    obj_pred_i = scores_all
-                    cls_pred_i = cls_all
-
-                else:
-                    # Do NMS separately for each class
-                    bbx_pred_i, cls_pred_i, obj_pred_i = [], [], []
-                    for cls_id, (bbx_cls_i, obj_cls_i) in enumerate(zip(torch.unbind(bbx_i, dim=1),
-                                                                        torch.unbind(obj_i, dim=1)[1:])):
-                        # Filter out low-scoring predictions
-                        idx = obj_cls_i > self.score_threshold
-                        if not idx.any().item():
-                            continue
-                        bbx_cls_i = bbx_cls_i[idx]
-                        obj_cls_i = obj_cls_i[idx]
-
-                        # Filter out empty predictions
-                        idx = (bbx_cls_i[:, 2] > bbx_cls_i[:, 0]) & (bbx_cls_i[:, 3] > bbx_cls_i[:, 1])
-                        if not idx.any().item():
-                            continue
-                        bbx_cls_i = bbx_cls_i[idx]
-                        obj_cls_i = obj_cls_i[idx]
-
-                        # Do NMS
-                        idx = nms(bbx_cls_i.contiguous(), obj_cls_i.contiguous(), threshold=self.nms_threshold, n_max=-1)
-                        if idx.numel() == 0:
-                            continue
-                        bbx_cls_i = bbx_cls_i[idx]
-                        obj_cls_i = obj_cls_i[idx]
-
-                        # Save remaining outputs
-                        bbx_pred_i.append(bbx_cls_i)
-                        cls_pred_i.append(bbx_cls_i.new_full((bbx_cls_i.size(0),), cls_id, dtype=torch.long))
-                        obj_pred_i.append(obj_cls_i)
-
-                    # Compact predictions from the classes
-                    if len(bbx_pred_i) == 0:
-                        raise Empty
-                    bbx_pred_i = torch.cat(bbx_pred_i, dim=0)
-                    cls_pred_i = torch.cat(cls_pred_i, dim=0)
-                    obj_pred_i = torch.cat(obj_pred_i, dim=0)
+                bbx_pred_i = bbx_all
+                obj_pred_i = scores_all
+                cls_pred_i = cls_all
 
                 # Do post-NMS selection (if needed)
                 if bbx_pred_i.size(0) > self.max_predictions:

@@ -1,14 +1,20 @@
 from collections import OrderedDict
-import torch
+import torch, sys
 import torch.nn as nn
 from panoptic_bev.utils.sequence import pad_packed_images
 from panoptic_bev.utils.parallel.packed_sequence import PackedSequence
 import torch.utils.checkpoint as checkpoint
+from panoptic_bev.algos.po_fusion_ts import po_inference
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 
 
 NETWORK_INPUTS = ["img", "calib", "extrinsics", "valid_msk"]
+#False: turn_off jit, True: use jit inference
+g_toggle_body_jit = False
+g_toggle_transformer_jit = False
+g_toggle_semantic_jit = False
+g_toggle_po_jit = False
 
 class PanopticBevNetTs(nn.Module):
     def __init__(self,
@@ -31,16 +37,25 @@ class PanopticBevNetTs(nn.Module):
                  out_shape=None,
                  tfm_scales=None):
         super(PanopticBevNetTs, self).__init__()
+        self.body_jit_path = "../jit/body_encoder.pt"
+        self.body = body
 
         # Backbone
-        self.body = body
+        if g_toggle_body_jit:
+            self.body_jit = torch.jit.load(self.body_jit_path)
+            logger.debug("load encoder: {}".format(self.body_jit_path))
 
         # Transformer
         self.transformer = transformer
+        self.transformer_jit_path = "../jit/ms_transformer.pt"
+        if g_toggle_transformer_jit:
+            self.transformer_jit = torch.jit.load(self.transformer_jit_path)
+            logger.debug("load transformer: {}".format(self.transformer_jit_path))
 
         # Modules
         self.rpn_head = rpn_head
         self.roi_head = roi_head
+
         self.sem_head = sem_head
 
         # Algorithms
@@ -49,6 +64,16 @@ class PanopticBevNetTs(nn.Module):
         self.inst_algo = inst_algo
         self.sem_algo = sem_algo
         self.po_fusion_algo = po_fusion_algo
+
+        self.sem_algo_jit_path = "../jit/sem_algo.pt"
+        if g_toggle_semantic_jit:
+            self.sem_algo_jit = torch.jit.load(self.sem_algo_jit_path)
+            logger.debug("load sem_algo: {}".format(self.sem_algo_jit_path))
+
+        self.po_fusion_jit_path = "../jit/po_fusion.pt"
+        if g_toggle_po_jit:
+            self.po_fusion_jit = torch.jit.load(self.po_fusion_jit_path)
+            logger.debug("load po_fusion: {}".format(self.po_fusion_jit_path))
 
         # Params
         self.dataset = dataset
@@ -63,7 +88,9 @@ class PanopticBevNetTs(nn.Module):
         W, Z = out_shape
         Z *= 2 # for multi_view, double Z_out
         self.img_size = torch.Size([W, Z])
-        self.valid_size = [torch.Size([W, Z])]
+        self.img_size_t = torch.tensor([W, Z])
+        self.valid_size = [torch.tensor([W, Z])]
+        self.valid_size_t = torch.stack(self.valid_size)
         for idx, scale in enumerate(tfm_scales):
             ms_bev_tmp = torch.zeros(1, 256, int(W/scale), int(Z/scale))
             logger.debug("{}- scale: {} append ms_bev: {}".format(idx, scale, ms_bev_tmp.shape))
@@ -93,10 +120,30 @@ class PanopticBevNetTs(nn.Module):
             msk = valid_msk[0, idx] #[896, 768]
             logger.debug("process camera-{}, img: {}, intrinsics: {}, extrinsics: {}, msk: {}".format(idx, image.shape, intrin.shape, extrin, msk.shape))
             # Get the image features
-            ms_feat = self.body(image)
+            if g_toggle_body_jit:
+                ms_feat = self.body_jit(image)
+            else:
+                ms_feat = self.body(image)
+
+            # debug_str = "ms_feat: "
+            # for i, f in enumerate(ms_feat):
+            #     tmp_str = " {}-{},".format(i, f.shape)
+            #     debug_str += tmp_str
+            # logger.debug(debug_str)
+
+            # body_ts = torch.jit.trace(self.body, (image), check_trace=True)
+            # torch.jit.save(body_ts, self.body_jit_path)
+            # return
 
             # Transform from the front view to the BEV and upsample the height dimension
-            ms_bev_tmp, _, _, _ = self.transformer(ms_feat, intrin, extrin, msk)
+            if g_toggle_transformer_jit:
+                ms_bev_tmp = self.transformer_jit(ms_feat, intrin, extrin, msk)
+            else:
+                ms_bev_tmp = self.transformer(ms_feat, intrin, extrin, msk)
+            # transformer_ts = torch.jit.trace(self.transformer, (ms_feat, intrin, extrin, msk), check_trace=True)
+            # torch.jit.save(transformer_ts, self.transformer_jit_path)
+            # sys.exit(0)
+
             # if ms_bev == None:
             #     ms_bev = ms_bev_tmp
             # else:
@@ -107,37 +154,50 @@ class PanopticBevNetTs(nn.Module):
             del ms_feat, ms_bev_tmp
 
         # RPN Part
-        proposals = self.rpn_algo.inference(self.rpn_head, ms_bev, self.valid_size, self.training)
+        proposals = self.rpn_algo.inference(self.rpn_head, ms_bev, self.valid_size, training=False)
 
         # ROI Part
-        bbx_pred, cls_pred, obj_pred, msk_pred, roi_msk_logits = self.inst_algo.inference(self.roi_head, ms_bev,
+        bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo.inference(self.roi_head, ms_bev,
                                                                                               proposals, self.valid_size,
                                                                                               self.img_size)
 
         # Segmentation Part
-        sem_pred, sem_logits, sem_feat = self.sem_algo.inference(self.sem_head, ms_bev, self.valid_size, self.img_size)
+        if g_toggle_semantic_jit:
+            sem_pred, sem_logits = self.sem_algo_jit(ms_bev, self.valid_size_t, self.img_size_t)
+        else:
+            # sem_pred, sem_logits, _ = self.sem_algo.inference(self.sem_head, ms_bev, self.valid_size, self.img_size)
+            sem_pred, sem_logits = self.sem_algo(ms_bev, self.valid_size_t, self.img_size_t)
+        # sem_algo_ts = torch.jit.trace(self.sem_algo, (ms_bev, self.valid_size_t, self.img_size_t), check_trace=True)
+        # torch.jit.save(sem_algo_ts, self.sem_algo_jit_path)
+        # sys.exit(0)
 
         # Panoptic Fusion. Fuse the semantic and instance predictions to generate a coherent output
         # The first channel of po_pred contains the semantic labels
         # The second channel contains the instance masks with the instance label being the corresponding semantic label
-        po_pred, _, _ = self.po_fusion_algo.inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size)
-        logger.debug("po_fusion input: sem_logits: {}, roi_msk_logits: {}, bbx_pred: {}, cls_pred: {}".format(sem_logits[0].shape, roi_msk_logits[0].shape, bbx_pred[0].shape, cls_pred[0].shape))
+        # po_pred, _, _ = self.po_fusion_algo.inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size)
+        roi_msk_logits = torch.stack(roi_msk_logits, dim=0)
+        bbx_pred = torch.unsqueeze(bbx_pred.contiguous[0], dim=0)
+        cls_pred = torch.unsqueeze(cls_pred.contiguous[0], dim=0)
+        obj_pred = obj_pred.contiguous[0]
+        logger.debug("po_fusion input: sem_logits: {}, roi_msk_logits: {}, bbx_pred: {}, cls_pred: {}".format(sem_logits.shape, roi_msk_logits.shape, bbx_pred.shape, cls_pred.shape))
+        
+        if g_toggle_po_jit:
+            po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+        else:
+            po_pred = po_inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+        # torch.jit.save(po_inference, self.po_fusion_jit_path)
+        # sys.exit(0)
 
         # Prepare outputs
         # PREDICTIONS
-        result['bbx_pred'] = bbx_pred.contiguous[0]
-        result['cls_pred'] = cls_pred.contiguous[0]
-        result['obj_pred'] = obj_pred.contiguous[0]
-        result['msk_pred'] = msk_pred.contiguous[0]
-        result["sem_pred"] = sem_pred.contiguous[0]
-        # result['sem_logits'] = sem_logits
-        # result['vf_logits'] = vf_logits_list
-        # result['v_region_logits'] = v_region_logits_list
-        # result['f_region_logits'] = f_region_logits_list
-        logger.info("panoptic_bev output, bbx_pred: {}, cls_pred: {}, obj_pred: {}, msk_pred: {}, roi_msk_logits: {}".format(result['bbx_pred'].shape, result['cls_pred'].shape, result['obj_pred'].shape, result['msk_pred'].shape, roi_msk_logits[0].shape))
-        result['po_pred'] = po_pred[0].contiguous[0]
-        result['po_class'] = po_pred[1].contiguous[0]
-        result['po_iscrowd'] = po_pred[2].contiguous[0]
+        result['bbx_pred'] = bbx_pred[0]
+        result['cls_pred'] = cls_pred[0]
+        result['obj_pred'] = obj_pred
+        result["sem_pred"] = sem_pred
+        logger.info("panoptic_bev output, bbx_pred: {}, cls_pred: {}, obj_pred: {}, sem_pred: {}".format(result['bbx_pred'].shape, result['cls_pred'].shape, result['obj_pred'].shape, result["sem_pred"].shape))
+        result['po_pred'] = po_pred[0]
+        result['po_class'] = po_pred[1]
+        result['po_iscrowd'] = po_pred[2]
         logger.info("panoptic_bev output, po_pred: {}, po_class: {}, po_iscrowd: {}".format(result['po_pred'].shape, result['po_class'], result['po_iscrowd']))
 
         return result

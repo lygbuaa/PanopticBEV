@@ -9,7 +9,8 @@ from panoptic_bev.models.backbone_edet.efficientnet import EfficientNet as EffNe
 from panoptic_bev.models.backbone_edet.efficientnet_utils import MemoryEfficientSwish, Swish
 from panoptic_bev.models.backbone_edet.efficientnet_utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
 from panoptic_bev.models.backbone_edet.efficientdet_utils import Anchors, load_pretrained_weights
-
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 def nms(dets, thresh):
     return nms_torch(dets[:, :4], dets[:, 4], thresh)
@@ -175,6 +176,8 @@ class BiFPN(nn.Module):
         self.p7_w2_relu = nn.ReLU()
 
         self.attention = attention
+
+        logger.debug("BiFPN init, num_channels: {}, conv_channels: {}, first_time: {}, epsilon: {}, onnx_export: {}, attention: {}, use_p8: {}".format(num_channels, conv_channels, first_time, epsilon, onnx_export, attention, use_p8))
 
 
     def forward(self, inputs):
@@ -465,9 +468,10 @@ class EfficientDet(nn.Module):
         # num_anchors = len(self.aspect_ratios) * self.num_scales
 
         self.bifpn = nn.Sequential(
-            *[BiFPN(self.fpn_num_filters[self.compound_coef],
-                    conv_channel_coef[compound_coef],
-                    True if _ == 0 else False,
+            *[BiFPN(num_channels=self.fpn_num_filters[self.compound_coef],
+                    conv_channels=conv_channel_coef[compound_coef],
+                    first_time=True if _ == 0 else False,
+                    onnx_export=True,
                     attention=True if compound_coef < 6 else False,
                     use_p8=compound_coef > 7)
               for _ in range(self.fpn_cell_repeats[compound_coef])])
@@ -481,9 +485,9 @@ class EfficientDet(nn.Module):
         #                              num_layers=self.box_class_repeats[self.compound_coef],
         #                              pyramid_levels=self.pyramid_levels[self.compound_coef])
 
-        self.anchors = Anchors(anchor_scale=self.anchor_scale[compound_coef],
-                               pyramid_levels=(torch.arange(self.pyramid_levels[self.compound_coef]) + 3).tolist(),
-                               **kwargs)
+        # self.anchors = Anchors(anchor_scale=self.anchor_scale[compound_coef],
+        #                        pyramid_levels=(torch.arange(self.pyramid_levels[self.compound_coef]) + 3).tolist(),
+        #                        **kwargs)
 
         self.backbone_net = EfficientNet(self.backbone_compound_coef[compound_coef], load_weights)
 

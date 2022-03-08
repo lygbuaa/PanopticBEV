@@ -1,10 +1,11 @@
 # Author: Zylo117
 
 import math
-
+import torch
 from torch import nn
 import torch.nn.functional as F
-
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 class Conv2dStaticSamePadding(nn.Module):
     """
@@ -37,8 +38,10 @@ class Conv2dStaticSamePadding(nn.Module):
         extra_v = (math.ceil(h / self.stride[0]) - 1) * self.stride[0] - h + self.kernel_size[0]
 
         left = extra_h // 2
+        # left = torch.div(extra_h, 2, rounding_mode='floor')
         right = extra_h - left
         top = extra_v // 2
+        # top = torch.div(extra_v, 2, rounding_mode='floor')
         bottom = extra_v - top
 
         x = F.pad(x, [left, right, top, bottom])
@@ -76,8 +79,10 @@ class MaxPool2dStaticSamePadding(nn.Module):
         extra_v = (math.ceil(h / self.stride[0]) - 1) * self.stride[0] - h + self.kernel_size[0]
 
         left = extra_h // 2
+        # left = torch.div(extra_h, 2, rounding_mode='floor')
         right = extra_h - left
         top = extra_v // 2
+        # top = torch.div(extra_v, 2, rounding_mode='floor')
         bottom = extra_v - top
 
         x = F.pad(x, [left, right, top, bottom])

@@ -4,7 +4,8 @@ import torch.nn.functional as functional
 
 from panoptic_bev.utils.parallel import PackedSequence
 from panoptic_bev.utils.sequence import pack_padded_images
-
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 class SemanticSegLoss:
     """Semantic segmentation loss
 
@@ -86,7 +87,7 @@ class SemanticSegLoss:
         return sum(sem_loss) / len(sem_logits)
 
 
-class SemanticSegAlgo:
+class SemanticSegAlgo(torch.nn.Module):
     """Semantic segmentation algorithm
 
     Parameters
@@ -96,14 +97,16 @@ class SemanticSegAlgo:
         Number of classes
     """
 
-    def __init__(self, loss, num_classes, ignore_index=255):
+    def __init__(self, head, loss, num_classes, ignore_index=255):
+        super(SemanticSegAlgo, self).__init__()
         self.loss = loss
+        self.head = head
         self.num_classes = num_classes
         self.ignore_index = ignore_index
 
     @staticmethod
     def _pack_logits(sem_logits, valid_size, img_size):
-        sem_logits = functional.interpolate(sem_logits, size=img_size, mode="bilinear", align_corners=False)
+        sem_logits = functional.interpolate(sem_logits, size=img_size.tolist(), mode="bilinear", align_corners=False)
         return pack_padded_images(sem_logits, valid_size)
 
     def _confusion_matrix(self, sem_pred, sem):
@@ -121,49 +124,12 @@ class SemanticSegAlgo:
 
         return confmat.view(self.num_classes, self.num_classes)
 
-    @staticmethod
-    def _logits(head, x, bbx, img_size, roi):
-        sem_logits, sem_feat, roi_logits = head(x, bbx, img_size, roi)
-        return sem_logits, sem_feat, roi_logits
+    # @staticmethod
+    # def _logits(head, x, bbx, img_size, roi):
+    #     sem_logits, sem_feat, roi_logits = head(x, bbx, img_size, roi)
+    #     return sem_logits, sem_feat, roi_logits
 
-    def training(self, head, x, sem, bbx, valid_size, img_size, weights_msk, intrinsics):
-        """Given input features and ground truth compute semantic segmentation loss, confusion matrix and prediction
-
-        Parameters
-        ----------
-        head : torch.nn.Module
-            Module to compute semantic segmentation logits given an input feature map. Must be callable as `head(x)`
-        x : torch.Tensor
-            A tensor of image features with shape N x C x H x W
-        sem : sequence of torch.Tensor
-            A sequence of N tensors of ground truth semantic segmentations with shapes H_i x W_i
-        valid_size : list of tuple of int
-            List of valid image sizes in input coordinates
-        img_size : tuple of int
-            Spatial size of the, possibly padded, image tensor used as input to the network that calculates x
-
-        Returns
-        -------
-        sem_loss : torch.Tensor
-            A scalar tensor with the computed loss
-        conf_mat : torch.Tensor
-            A confusion matrix tensor with shape M x M, where M is the number of classes
-        sem_pred : PackedSequence
-            A sequence of N tensors of semantic segmentations with shapes H_i x W_i
-        """
-        # Compute logits and prediction
-        sem_logits_, sem_feat, roi_logits = self._logits(head, x, bbx, img_size, False)
-        sem_logits = self._pack_logits(sem_logits_, valid_size, img_size)
-
-        sem_pred = PackedSequence([sem_logits_i.max(dim=0)[1] for sem_logits_i in sem_logits])
-
-        # Compute loss and confusion matrix
-        sem_loss = self.loss(sem_logits, sem, weights_msk, intrinsics=intrinsics)
-        conf_mat = self._confusion_matrix(sem_pred, sem)
-
-        return sem_loss, conf_mat, sem_pred, sem_logits, sem_feat
-
-    def inference(self, head, x, valid_size, img_size):
+    def forward(self, x, valid_size, img_size):
         """Given input features compute semantic segmentation prediction
 
         Parameters
@@ -182,7 +148,16 @@ class SemanticSegAlgo:
         sem_pred : PackedSequence
             A sequence of N tensors of semantic segmentations with shapes H_i x W_i
         """
-        sem_logits_, sem_feat, _ = self._logits(head, x, None, img_size, False)
-        sem_logits = self._pack_logits(sem_logits_, valid_size, img_size)
-        sem_pred = PackedSequence([sem_logits_i.max(dim=0)[1] for sem_logits_i in sem_logits])
-        return sem_pred, sem_logits, sem_feat
+        # sem_logits_, sem_feat, _ = self._logits(x, None, img_size, False)
+        sem_logits_, _, _  = self.head(x, None, img_size, False)
+        # sem_logits = self._pack_logits(sem_logits_, valid_size, img_size)
+        # logger.debug("sem_head output sem_logits_: {}".format(sem_logits_.shape))
+
+        sem_logits = functional.interpolate(sem_logits_, size=img_size.tolist(), mode="bilinear", align_corners=False)
+        # logger.debug("interpolation output sem_logits: {}".format(sem_logits.shape))
+
+        # sem_logits = pack_padded_images(sem_logits, valid_size)
+        # sem_pred = PackedSequence([sem_logits_i.max(dim=0)[1] for sem_logits_i in sem_logits])
+        sem_pred = torch.cat([sem_logits_i.max(dim=0)[1] for sem_logits_i in sem_logits])
+        # logger.debug("sem_pred: {}".format(sem_pred.shape))
+        return sem_pred, sem_logits
