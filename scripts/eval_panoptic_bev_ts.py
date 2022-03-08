@@ -393,9 +393,9 @@ def test(model, dataloader, **varargs):
     global g_bev_visualizer
 
     fuser = FuseConvBn()
-    # fuser.do_bn_fusion(model)
-    # fuser.get_conv_bn_pairs()
-    # fuser.enumerate(model)
+    fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
+    fuser.do_bn_fusion_v2(model, bn_name="InPlaceABNSync")
+    logger.info("final model after fusion: {}".format(model))
 
     model.eval()
 
@@ -468,8 +468,6 @@ def test(model, dataloader, **varargs):
             # logger.info("torchscript model saved to ./panoptic_bev_0.pt")
             # break
 
-            # logger.debug("model results: {}".format(results))
-            # inputs = (sample["img"], sample["bev_msk"], sample["front_msk"], sample["weights_msk"], sample["cat"], sample["iscrowd"], sample["bbx"], sample["calib"], False, True)
             # macs, params = profile(model, inputs)
             # logger.info("thop profile, macs: {}, params: {}".format(macs, params))
 
@@ -477,7 +475,6 @@ def test(model, dataloader, **varargs):
                 distributed.barrier()
 
             g_bev_visualizer.plot_bev(sample, it, results)
-
             break
             # for idx, (path, submodule) in enumerate(model.named_modules()):
             #     logger.info("named_modules-{} - {} - {}: {}".format(idx, path, submodule.__class__.__name__, submodule))
@@ -584,8 +581,8 @@ def main(args):
     if not args.debug:
         torch.backends.cudnn.benchmark = config["general"].getboolean("cudnn_benchmark")
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)  # Convert batch norm to SyncBatchNorm
-        # model = model.cuda(device)
-        model = DistributedDataParallel(model.cuda(device), device_ids=[device_id], output_device=device_id, find_unused_parameters=True)
+        model = model.cuda(device)
+        # model = DistributedDataParallel(model.cuda(device), device_ids=[device_id], output_device=device_id, find_unused_parameters=True)
     else:
         model = model.cuda(device)
 
