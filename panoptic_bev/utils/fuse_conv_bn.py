@@ -276,6 +276,7 @@ class FuseConvBn(object):
 
     # v2 can replace every bn layer with placeholder
     def do_bn_fusion_v2(self, model, bn_name="SyncBatchNorm", placeholder=torch.nn.Identity()):
+        bn_counter = 0
         for n, m in model.named_modules():
             # if isinstance(m, torch.nn.Conv2d):
             next_bn = self.compute_next_bn(n, model, bn_name)
@@ -288,8 +289,10 @@ class FuseConvBn(object):
                     self.fuse_abn_to_conv(next_bn_, m)
                     placeholder = self.make_placeholder(next_bn_)
                 self.set_layer(model, next_bn, placeholder)
+                bn_counter += 1
                 # logger.info("fuse {}".format(next_bn_))
         # logger.info("final model after fusion: {}".format(model))
+        logger.info("fused {} bn layer".format(bn_counter))
         return model
 
     def make_model_demo(self):

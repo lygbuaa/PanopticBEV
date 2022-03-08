@@ -395,7 +395,7 @@ def test(model, dataloader, **varargs):
     fuser = FuseConvBn()
     fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
     fuser.do_bn_fusion_v2(model, bn_name="InPlaceABNSync")
-    logger.info("final model after fusion: {}".format(model))
+    # logger.info("final model after fusion: {}".format(model))
 
     model.eval()
 
@@ -461,12 +461,12 @@ def test(model, dataloader, **varargs):
             # results = model(**sample)
             logger.info("inputs img: {}, calib: {}, extrinsics: {}, valid_msk: {}".format(sample["img"].shape, sample["calib"].shape, sample["extrinsics"].shape, sample["valid_msk"].shape))
             inputs = (sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
-            results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+            # results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
 
-            # model_ts = torch.jit.trace(model, inputs, strict=False)
-            # torch.jit.save(model_ts, "./panoptic_bev_0.pt")
-            # logger.info("torchscript model saved to ./panoptic_bev_0.pt")
-            # break
+            model_ts = torch.jit.trace(model, inputs, check_trace=False, strict=False)
+            torch.jit.save(model_ts, "./panoptic_bev_gpu.pt")
+            logger.info("torchscript model saved to ./panoptic_bev_gpu.pt")
+            break
 
             # macs, params = profile(model, inputs)
             # logger.info("thop profile, macs: {}, params: {}".format(macs, params))

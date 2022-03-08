@@ -51,7 +51,8 @@ class SwishImplementation(torch.autograd.Function):
 
 class MemoryEfficientSwish(nn.Module):
     def forward(self, x):
-        return SwishImplementation.apply(x)
+        # return SwishImplementation.apply(x)
+        return x * torch.sigmoid(x)
 
 
 class Swish(nn.Module):
