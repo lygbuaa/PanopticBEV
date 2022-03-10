@@ -6,5 +6,6 @@ python3 -m torch.distributed.launch --nproc_per_node=1 --master_addr="10.11.10.1
                                     --dataset_root_dir="/home/hugoliu/github/dataset/nuscenes/trainval" \
                                     --mode=test \
                                     --test_dataset=nuScenes \
-                                    --resume="/home/hugoliu/github/PanopticBEV/weights/d3_0209_448_768/saved_models/model_best.pth" \
+                                    --resume="/home/hugoliu/github/PanopticBEV/weights/d3_0308_1024_1920/model_epoch_22.pth" \
                                     --config=nuscenes.ini \
+                                    #--resume="/home/hugoliu/github/PanopticBEV/weights/d3_0209_448_768/saved_models/model_best.pth" \
