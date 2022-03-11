@@ -184,7 +184,8 @@ def make_dataloader(args, config, rank, world_size):
                           rgb_mean=dl_config.getstruct("rgb_mean"),
                           rgb_std=dl_config.getstruct("rgb_std"),
                           front_resize=dl_config.getstruct("front_resize"),
-                          bev_crop=dl_config.getstruct("bev_crop"))
+                          bev_crop=dl_config.getstruct("bev_crop"),
+                          scale=dl_config.getstruct("scale"))
 
     if args.val_dataset == "Kitti360":
         val_db = BEVKitti360Dataset(seam_root_dir=args.seam_root_dir, dataset_root_dir=args.dataset_root_dir,
@@ -548,7 +549,7 @@ def validate(model, dataloader, **varargs):
         idxs = sample['idx']
         with torch.no_grad():
             sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
-            sample['calib'], _ = pad_packed_images(sample['calib'])
+            # sample['calib'], _ = pad_packed_images(sample['calib'])
 
             time_meters['data_time'].update(torch.tensor(time.time() - data_time))
             batch_time = time.time()
@@ -559,10 +560,11 @@ def validate(model, dataloader, **varargs):
             if not varargs['debug']:
                 distributed.barrier()
 
-            try: 
-                g_bev_visualizer.plot_bev(sample, it, results)
-            except Exception as e:
-                logger.e("save visualize error: {}".format(str(e)))
+            if it % 400 == 0:
+                try: 
+                    g_bev_visualizer.plot_bev(sample, it, results)
+                except Exception as e:
+                    logger.e("save visualize error: {}".format(str(e)))
 
             losses = OrderedDict((k, v.mean()) for k, v in losses.items())
             losses["loss"] = sum(loss_weights[loss_name] * losses[loss_name] for loss_name in losses.keys())

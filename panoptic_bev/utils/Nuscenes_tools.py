@@ -66,12 +66,18 @@ class BEVTransformV2(object):
                  longest_max_size,
                  rgb_mean=None,
                  rgb_std=None,
+                 scale=None,
                  front_resize=None):
         self.shortest_size = shortest_size
         self.longest_max_size = longest_max_size
-        self.front_resize = front_resize
+        
         self.rgb_mean = rgb_mean
         self.rgb_std = rgb_std
+        self.scale = scale
+        if self.scale != None:
+            self.front_resize = (int(front_resize[0]*self.scale), int(front_resize[1]*self.scale))
+        else:
+            self.front_resize = front_resize
 
     def _resize(self, img, mode):
         if img is not None:
@@ -128,13 +134,17 @@ class BEVNuScenesDatasetV2(data.Dataset):
     bev_size = [896, 768]
     fov_borders = {}
 
-    def __init__(self, nuscenes_version, nuscenes_root_dir, transform, bev_size):
+    def __init__(self, nuscenes_version, nuscenes_root_dir, transform, bev_size, scale = None):
         super(BEVNuScenesDatasetV2, self).__init__()
         self.nuscenes_root_dir = nuscenes_root_dir
         self.transform = transform
         self.dataloader = NuScenesDataLoader(version=nuscenes_version, dataroot=nuscenes_root_dir)
         self.idx = 0
-        self.bev_size = bev_size
+        
+        if scale != None:
+            self.bev_size = (int(bev_size[0]*scale), int(bev_size[1]*scale))
+        else:
+            self.bev_size = bev_size
         self.init_valid_mask()
 
     def init_valid_mask(self):

@@ -24,11 +24,14 @@ class PanopticBevNet(nn.Module):
                  po_fusion_algo,
                  dataset,
                  classes=None,
+                 scale=None,
                  front_vertical_classes=None,  # In the frontal view
                  front_flat_classes=None,  # In the frontal view
                  bev_vertical_classes=None,  # In the BEV
                  bev_flat_classes=None):  # In the BEV
         super(PanopticBevNet, self).__init__()
+
+        self.scale = scale
 
         # Backbone
         self.body = body
@@ -148,8 +151,8 @@ class PanopticBevNet(nn.Module):
             img_size = bev_msk.shape[-2:]
             # logger.debug("valid_size: {}".format(valid_size)) #[torch.Size([896, 768])]
         else:
-            valid_size = [torch.Size([896, 768*2])] # for multi_view, double Z_out
-            img_size = torch.Size([896, 768*2]) # for multi_view, double Z_out
+            valid_size = [torch.Size([int(896*self.scale), int(768*2*self.scale)])] # for multi_view, double Z_out
+            img_size = torch.Size([int(896*self.scale), int(768*2*self.scale)]) # for multi_view, double Z_out
 
         if not multi_view and front_msk is not None:
             front_msk, _ = pad_packed_images(front_msk)
@@ -179,11 +182,11 @@ class PanopticBevNet(nn.Module):
         if not multi_view:
             calib, _ = pad_packed_images(calib)
             img, _ = pad_packed_images(img)
-            ms_feat = self.body(img)
+            # ms_feat = self.body(img)
+            ms_feat = checkpoint.checkpoint(self.body, img)
             ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = self.transformer(ms_feat, calib)
-            # ms_feat = checkpoint.checkpoint(self.body, img)
             # ms_bev, vf_logits_list, v_region_logits_list, f_region_logits_list = checkpoint.checkpoint(self.transformer, ms_feat, calib)
-            del ms_feat
+            del ms_feat, img
         else:
             for idx, (image, intrin, extrin, msk) in enumerate(zip(img[0], calib[0], extrinsics[0], valid_msk[0])):
                 logger.debug("process camera-{}, img: {}, intrinsics: {}, extrinsics: {}, msk: {}".format(idx, image.shape, intrin.shape, extrin, msk.shape))

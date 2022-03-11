@@ -140,9 +140,10 @@ def make_dataloader_v2(args, config, rank, world_size):
                           longest_max_size=dl_config.getint("longest_max_size"),
                           rgb_mean=dl_config.getstruct("rgb_mean"),
                           rgb_std=dl_config.getstruct("rgb_std"),
-                          front_resize=dl_config.getstruct("front_resize"))
+                          front_resize=dl_config.getstruct("front_resize"),
+                          scale=dl_config.getstruct("scale"))
     datasetv2 = BEVNuScenesDatasetV2(nuscenes_version="v1.0-mini", nuscenes_root_dir="/home/hugoliu/github/dataset/nuscenes/mini", 
-                transform=tfv2, bev_size=dl_config.getstruct("bev_crop"))
+                transform=tfv2, bev_size=dl_config.getstruct("bev_crop"), scale=dl_config.getstruct("scale"))
     test_sampler = DistributedARBatchSampler(datasetv2, dl_config.getint("val_batch_size"), world_size, rank, False)
     test_dl = torch.utils.data.DataLoader(datasetv2,
                                             batch_sampler=test_sampler,
@@ -163,7 +164,8 @@ def make_dataloader(args, config, rank, world_size):
                           rgb_mean=dl_config.getstruct("rgb_mean"),
                           rgb_std=dl_config.getstruct("rgb_std"),
                           front_resize=dl_config.getstruct("front_resize"),
-                          bev_crop=dl_config.getstruct("bev_crop"))
+                          bev_crop=dl_config.getstruct("bev_crop"),
+                          scale=dl_config.getstruct("scale"))
 
     if args.test_dataset == "Kitti360":
         test_db = BEVKitti360Dataset(seam_root_dir=args.seam_root_dir, dataset_root_dir=args.dataset_root_dir,
@@ -313,6 +315,7 @@ def make_model(args, config, num_thing, num_stuff):
     # Create the BEV network
     return PanopticBevNet(body, bev_transformer, rpn_head, roi_head, sem_head, transformer_algo, rpn_algo, roi_algo,
                           sem_algo, po_fusion_algo, args.test_dataset, classes=classes,
+                          scale=dl_config.getstruct("scale"),
                           front_vertical_classes=transformer_config.getstruct("front_vertical_classes"),
                           front_flat_classes=transformer_config.getstruct("front_flat_classes"),
                           bev_vertical_classes=transformer_config.getstruct('bev_vertical_classes'),
