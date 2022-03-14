@@ -187,7 +187,8 @@ def make_dataloader(args, config, rank, world_size):
                           rgb_mean=dl_config.getstruct("rgb_mean"),
                           rgb_std=dl_config.getstruct("rgb_std"),
                           front_resize=dl_config.getstruct("front_resize"),
-                          bev_crop=dl_config.getstruct("bev_crop"))
+                          bev_crop=dl_config.getstruct("bev_crop"),
+                          scale=dl_config.getstruct("scale"))
 
     if args.val_dataset == "Kitti360":
         val_db = BEVKitti360Dataset(seam_root_dir=args.seam_root_dir, dataset_root_dir=args.dataset_root_dir,
@@ -440,8 +441,6 @@ def train(model, optimizer, scheduler, dataloader, meters, **varargs):
     data_time = time.time()
 
     for it, sample in enumerate(dataloader):
-        if it > 20:
-            break
         sample = {k: sample[k].cuda(device=varargs['device'], non_blocking=True) for k in NETWORK_INPUTS}
         # sample['calib'], _ = pad_packed_images(sample['calib'])
 
@@ -548,8 +547,6 @@ def validate(model, dataloader, **varargs):
     data_time = time.time()
 
     for it, sample in enumerate(dataloader):
-        if it > 20:
-            break
         batch_sizes = [m.shape[-2:] for m in sample['bev_msk']]
         original_sizes = sample['size']
         idxs = sample['idx']
