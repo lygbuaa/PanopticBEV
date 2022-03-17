@@ -1,7 +1,7 @@
 from os import path, listdir
 
 import setuptools
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
 
 
 def find_sources(root_dir):
@@ -13,7 +13,6 @@ def find_sources(root_dir):
 
     return sources
 
-
 def make_extension(name, package):
     return CUDAExtension(
         name="{}.{}._backend".format(package, name),
@@ -23,6 +22,7 @@ def make_extension(name, package):
             "nvcc": ["--expt-extended-lambda"],
         },
         include_dirs=["include/"],
+        # cmdclass={"build_ext": BuildExtension.with_options(no_python_abi_suffix=True)},
     )
 
 here = path.abspath(path.dirname(__file__))

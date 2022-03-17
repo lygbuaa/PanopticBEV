@@ -1,10 +1,11 @@
 #include <torch/extension.h>
+#include <torch/script.h>
 
 #include "../../include/nms.h"
 #include "../../include/utils/checks.h"
 #include <torch/torch.h>
 
-at::Tensor nms(const at::Tensor& bbx, const at::Tensor& scores, float threshold, int n_max) {
+at::Tensor nms(const at::Tensor& bbx, const at::Tensor& scores, double threshold, int64_t n_max) {
   // Check inputs
   TORCH_CHECK(bbx.scalar_type() == scores.scalar_type(), "bbx and scores must have the same type");
   TORCH_CHECK(bbx.size(0) == scores.size(0), "bbx and scores must have the same length");
@@ -29,4 +30,8 @@ at::Tensor nms(const at::Tensor& bbx, const at::Tensor& scores, float threshold,
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("nms", &nms, "Perform non-maxima suppression, always return result as CPU Tensor");
+}
+
+TORCH_LIBRARY(po_cpp_ops, m) {
+  m.def("po_nms", nms);
 }

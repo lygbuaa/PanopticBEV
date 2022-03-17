@@ -13,6 +13,7 @@ NETWORK_INPUTS = ["img", "calib", "extrinsics", "valid_msk"]
 #False: turn_off jit, True: use jit inference
 g_toggle_body_jit = False
 g_toggle_transformer_jit = False
+g_toggle_rpn_jit = True
 g_toggle_semantic_jit = False
 g_toggle_po_jit = False
 
@@ -65,6 +66,11 @@ class PanopticBevNetTs(nn.Module):
         self.sem_algo = sem_algo
         self.po_fusion_algo = po_fusion_algo
 
+        self.rpn_algo_jit_path = "../jit/rpn_algo.pt"
+        if g_toggle_rpn_jit:
+            self.rpn_algo_jit = torch.jit.load(self.rpn_algo_jit_path)
+            logger.debug("load rpn_algo: {}".format(self.rpn_algo_jit_path))
+
         self.sem_algo_jit_path = "../jit/sem_algo.pt"
         if g_toggle_semantic_jit:
             self.sem_algo_jit = torch.jit.load(self.sem_algo_jit_path)
@@ -95,6 +101,9 @@ class PanopticBevNetTs(nn.Module):
             ms_bev_tmp = torch.zeros(1, 256, int(W/scale), int(Z/scale))
             logger.debug("{}- scale: {} append ms_bev: {}".format(idx, scale, ms_bev_tmp.shape))
             self.ms_bev_0.append(ms_bev_tmp)
+
+    def load_trained_params(self):
+        self.rpn_algo.set_head(self.rpn_head)
 
     def forward(self, img, calib=None, extrinsics=None, valid_msk=None):
         result = OrderedDict()
@@ -154,7 +163,18 @@ class PanopticBevNetTs(nn.Module):
             del ms_feat, ms_bev_tmp
 
         # RPN Part
-        proposals = self.rpn_algo.inference(self.rpn_head, ms_bev, self.valid_size, training=False)
+        if g_toggle_rpn_jit:
+            proposals = self.rpn_algo_jit(ms_bev, self.valid_size)
+        else:
+            # self.rpn_algo.set_head(self.rpn_head)
+            proposals = self.rpn_algo(ms_bev, self.valid_size)
+        # rpn_algo_ts = torch.jit.trace(self.rpn_algo, (ms_bev, self.valid_size), check_trace=True)
+        # torch.jit.save(rpn_algo_ts, self.rpn_algo_jit_path)
+        # sys.exit(0)
+
+        if len(proposals) < 1:
+            proposals.append(None)
+        proposals = PackedSequence(proposals)
 
         # ROI Part
         bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo.inference(self.roi_head, ms_bev,

@@ -94,7 +94,8 @@ class PredictionGenerator:
                 cls_all = cls_all[idx]
 
                 # Do NMS
-                idx = nms(bbx_all.contiguous(), scores_all.contiguous(), threshold=self.nms_threshold, n_max=-1)
+                # idx = nms(bbx_all.contiguous(), scores_all.contiguous(), threshold=self.nms_threshold, n_max=-1)
+                idx = torch.ops.po_cpp_ops.po_nms(bbx_all.contiguous(), scores_all.contiguous(), self.nms_threshold, -1)
                 if idx.numel() == 0:
                     continue
                 bbx_all = bbx_all[idx]
