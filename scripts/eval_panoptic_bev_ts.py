@@ -23,11 +23,8 @@ from panoptic_bev.models.backbone_edet.efficientdet import EfficientDet
 from panoptic_bev.models.panoptic_bev_ts import PanopticBevNetTs, NETWORK_INPUTS
 
 from panoptic_bev.algos.transformer import TransformerVFAlgo, TransformerVFLoss, TransformerRegionSupervisionLoss
-from panoptic_bev.algos.fpn import InstanceSegAlgoFPN, RPNAlgoFPN
+from panoptic_bev.algos.instance_seg_ts import InstanceSegAlgoFPN_JIT
 from panoptic_bev.algos.rpn_ts import RPNAlgoFPN_JIT
-from panoptic_bev.algos.instance_seg import PredictionGenerator as MskPredictionGenerator, InstanceSegLoss
-from panoptic_bev.algos.rpn import AnchorMatcher, ProposalGenerator, RPNLoss
-from panoptic_bev.algos.detection import PredictionGenerator as BbxPredictionGenerator, DetectionLoss, ProposalMatcher
 from panoptic_bev.algos.semantic_seg import SemanticSegLoss, SemanticSegAlgo
 from panoptic_bev.algos.po_fusion import PanopticLoss, PanopticFusionAlgo
 
@@ -280,10 +277,10 @@ def make_model(args, config, num_thing, num_stuff):
                                 rpn_config.getint("fpn_levels"))
 
     # Create instance segmentation network
-    bbx_prediction_generator = BbxPredictionGenerator(roi_config.getfloat("nms_threshold"),
-                                                      roi_config.getfloat("score_threshold"),
-                                                      roi_config.getint("max_predictions"),
-                                                      dataset_name=args.test_dataset)
+    # bbx_prediction_generator = BbxPredictionGenerator(roi_config.getfloat("nms_threshold"),
+    #                                                   roi_config.getfloat("score_threshold"),
+    #                                                   roi_config.getint("max_predictions"),
+    #                                                   dataset_name=args.test_dataset)
     msk_prediction_generator = None #MskPredictionGenerator()
     roi_size = roi_config.getstruct("roi_size")
     proposal_matcher = None
@@ -297,11 +294,19 @@ def make_model(args, config, num_thing, num_stuff):
     bbx_loss = None
     msk_loss = None
     lbl_roi_size = tuple(s * 2 for s in roi_size)
-    roi_algo = InstanceSegAlgoFPN(bbx_prediction_generator, msk_prediction_generator, proposal_matcher, bbx_loss, msk_loss, classes,
-                                  roi_config.getstruct("bbx_reg_weights"), roi_config.getint("fpn_canonical_scale"),
-                                  roi_config.getint("fpn_canonical_level"), roi_size, roi_config.getint("fpn_min_level"),
-                                  roi_config.getint("fpn_levels"), lbl_roi_size, roi_config.getboolean("void_is_background"), args.debug)
+    # roi_algo = InstanceSegAlgoFPN(bbx_prediction_generator, msk_prediction_generator, proposal_matcher, bbx_loss, msk_loss, classes,
+    #                               roi_config.getstruct("bbx_reg_weights"), roi_config.getint("fpn_canonical_scale"),
+    #                               roi_config.getint("fpn_canonical_level"), roi_size, roi_config.getint("fpn_min_level"),
+    #                               roi_config.getint("fpn_levels"), lbl_roi_size, roi_config.getboolean("void_is_background"), args.debug)
+
     roi_head = FPNMaskHead(transformer_config.getint("bev_ms_channels"), classes, roi_size, norm_act=norm_act_dynamic)
+    roi_algo = InstanceSegAlgoFPN_JIT( bbx_loss, msk_loss, roi_config.getstruct("bbx_reg_weights"), 
+                                    roi_config.getint("fpn_canonical_scale"), roi_config.getint("fpn_canonical_level"), roi_size, 
+                                    roi_config.getint("fpn_min_level"), roi_config.getint("fpn_levels"),
+                                    roi_config.getfloat("nms_threshold"), roi_config.getfloat("score_threshold"), roi_config.getint("max_predictions"))
+
+    # roi_algo = torch.jit.script(roi_algo)
+    # torch.jit.save(roi_algo, "../jit/roi_algo.pt")
 
     # Create semantic segmentation network
     W_out = int(dl_config.getstruct("bev_crop")[0] * dl_config.getfloat("scale"))
@@ -451,7 +456,7 @@ def test(model, dataloader, **varargs):
 
     for it, sample in enumerate(dataloader):
         # eval with front-100 images
-        if it > 2:
+        if it > 50:
             break
 
         do_loss=False

@@ -1,6 +1,6 @@
 import torch, math, sys
 import torch.nn.functional as F
-from panoptic_bev.utils.parallel import PackedSequence
+from panoptic_bev.utils.nms import nms
 from panoptic_bev.utils.bbx import shift_boxes
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()

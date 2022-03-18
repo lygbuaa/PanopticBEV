@@ -7,8 +7,7 @@
 #include "../../include/roi_sampling.h"
 
 std::tuple<at::Tensor, at::Tensor> roi_sampling_forward(
-    const at::Tensor& x, const at::Tensor& bbx, const at::Tensor& idx, std::tuple<int, int> out_size,
-    Interpolation interpolation, PaddingMode padding, bool valid_mask) {
+    const at::Tensor& x, const at::Tensor& bbx, const at::Tensor& idx, const at::Tensor& roi_size) {
   // Check dimensions
   TORCH_CHECK(x.ndimension() == 4, "x must be a 4-dimensional tensor");
   TORCH_CHECK(bbx.ndimension() == 2, "bbx must be a 2-dimensional tensor");
@@ -19,6 +18,12 @@ std::tuple<at::Tensor, at::Tensor> roi_sampling_forward(
   // Check types
   TORCH_CHECK(bbx.scalar_type() == at::ScalarType::Float, "bbx must have type float32");
   TORCH_CHECK(idx.scalar_type() == at::ScalarType::Long, "idx must have type long");
+
+  Interpolation interpolation = Interpolation::Bilinear;
+  PaddingMode padding = PaddingMode::Border;
+  bool valid_mask = false;
+  auto roi_size_cpu = roi_size.accessor<int, 1>();
+  std::tuple<int, int> out_size(roi_size_cpu[0], roi_size_cpu[0]);
 
   if (x.is_cuda()) {
     CHECK_CUDA(bbx);
@@ -71,4 +76,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 
   m.def("roi_sampling_forward", &roi_sampling_forward, "ROI sampling forward");
   m.def("roi_sampling_backward", &roi_sampling_backward, "ROI sampling backward");
+}
+
+TORCH_LIBRARY_FRAGMENT(po_cpp_ops, m) {
+  m.def("po_roi", roi_sampling_forward);
 }

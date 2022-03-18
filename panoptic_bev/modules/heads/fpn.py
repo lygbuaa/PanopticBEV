@@ -88,6 +88,21 @@ class FPNMaskHead(nn.Module):
             if hasattr(mod, "bias") and mod.bias is not None:
                 nn.init.constant_(mod.bias, 0.)
 
+    def forward_bbx(self, x):
+        # Run fully-connected head
+        x_fc = functional.avg_pool2d(x, 2)
+        x_fc_out = self.fc(x_fc.view(x_fc.size(0), -1))
+
+        cls_logits = self.roi_cls(x_fc_out)
+        bbx_logits = self.roi_bbx(x_fc_out).view(x_fc_out.size(0), -1, 4)
+
+        return cls_logits, bbx_logits
+
+    def forward_msk(self, x):
+        x = self.conv(x)
+        msk_logits = self.roi_msk(x)
+        return msk_logits
+
     def forward(self, x, do_cls_bbx=True, do_msk=True):
         """ROI head module for FPN
 

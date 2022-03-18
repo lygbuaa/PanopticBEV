@@ -32,6 +32,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("nms", &nms, "Perform non-maxima suppression, always return result as CPU Tensor");
 }
 
-TORCH_LIBRARY(po_cpp_ops, m) {
+TORCH_LIBRARY_FRAGMENT(po_cpp_ops, m) {
   m.def("po_nms", nms);
 }

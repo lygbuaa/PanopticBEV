@@ -11,11 +11,12 @@ logger = plogging.get_logger()
 
 NETWORK_INPUTS = ["img", "calib", "extrinsics", "valid_msk"]
 #False: turn_off jit, True: use jit inference
-g_toggle_body_jit = False
-g_toggle_transformer_jit = False
+g_toggle_body_jit = True
+g_toggle_transformer_jit = True
 g_toggle_rpn_jit = True
-g_toggle_semantic_jit = False
-g_toggle_po_jit = False
+g_toggle_roi_jit = True
+g_toggle_semantic_jit = True
+g_toggle_po_jit = True
 
 class PanopticBevNetTs(nn.Module):
     def __init__(self,
@@ -38,9 +39,9 @@ class PanopticBevNetTs(nn.Module):
                  out_shape=None,
                  tfm_scales=None):
         super(PanopticBevNetTs, self).__init__()
+        
         self.body_jit_path = "../jit/body_encoder.pt"
         self.body = body
-
         # Backbone
         if g_toggle_body_jit:
             self.body_jit = torch.jit.load(self.body_jit_path)
@@ -70,6 +71,11 @@ class PanopticBevNetTs(nn.Module):
         if g_toggle_rpn_jit:
             self.rpn_algo_jit = torch.jit.load(self.rpn_algo_jit_path)
             logger.debug("load rpn_algo: {}".format(self.rpn_algo_jit_path))
+
+        self.roi_algo_jit_path = "../jit/roi_algo.pt"
+        if g_toggle_roi_jit:
+            self.roi_algo_jit = torch.jit.load(self.roi_algo_jit_path)
+            logger.debug("load roi_algo: {}".format(self.roi_algo_jit_path))
 
         self.sem_algo_jit_path = "../jit/sem_algo.pt"
         if g_toggle_semantic_jit:
@@ -172,14 +178,18 @@ class PanopticBevNetTs(nn.Module):
         # torch.jit.save(rpn_algo_ts, self.rpn_algo_jit_path)
         # sys.exit(0)
 
-        if len(proposals) < 1:
-            proposals.append(None)
-        proposals = PackedSequence(proposals)
+        # if len(proposals) < 1:
+        #     proposals.append(None)
+        # proposals = PackedSequence(proposals)
 
         # ROI Part
-        bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo.inference(self.roi_head, ms_bev,
-                                                                                              proposals, self.valid_size,
-                                                                                              self.img_size)
+        if g_toggle_roi_jit:
+            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.roi_algo_jit(ms_bev, proposals, self.valid_size, self.img_size_t)
+        else:
+            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo(ms_bev, proposals, self.valid_size, self.img_size_t)
+        # inst_algo_ts = torch.jit.trace(self.inst_algo, (ms_bev, proposals, self.valid_size_t, self.img_size_t), check_trace=True)
+        # torch.jit.save(inst_algo_ts, self.roi_algo_jit_path)
+        # sys.exit(0)
 
         # Segmentation Part
         if g_toggle_semantic_jit:
@@ -195,11 +205,10 @@ class PanopticBevNetTs(nn.Module):
         # The first channel of po_pred contains the semantic labels
         # The second channel contains the instance masks with the instance label being the corresponding semantic label
         # po_pred, _, _ = self.po_fusion_algo.inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size)
+        bbx_pred = torch.stack(bbx_pred, dim=0)
+        cls_pred = torch.stack(cls_pred, dim=0)
         roi_msk_logits = torch.stack(roi_msk_logits, dim=0)
-        bbx_pred = torch.unsqueeze(bbx_pred.contiguous[0], dim=0)
-        cls_pred = torch.unsqueeze(cls_pred.contiguous[0], dim=0)
-        obj_pred = obj_pred.contiguous[0]
-        logger.debug("po_fusion input: sem_logits: {}, roi_msk_logits: {}, bbx_pred: {}, cls_pred: {}".format(sem_logits.shape, roi_msk_logits.shape, bbx_pred.shape, cls_pred.shape))
+        logger.debug("po_fusion input: sem_logits: {}, roi_msk_logits: {}, bbx_pred: {}, cls_pred: {}".format(sem_logits.shape, roi_msk_logits.shape, bbx_pred, cls_pred))
         
         if g_toggle_po_jit:
             po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
@@ -212,7 +221,7 @@ class PanopticBevNetTs(nn.Module):
         # PREDICTIONS
         result['bbx_pred'] = bbx_pred[0]
         result['cls_pred'] = cls_pred[0]
-        result['obj_pred'] = obj_pred
+        result['obj_pred'] = obj_pred[0]
         result["sem_pred"] = sem_pred
         logger.info("panoptic_bev output, bbx_pred: {}, cls_pred: {}, obj_pred: {}, sem_pred: {}".format(result['bbx_pred'].shape, result['cls_pred'].shape, result['obj_pred'].shape, result["sem_pred"].shape))
         result['po_pred'] = po_pred[0]
