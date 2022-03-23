@@ -21,6 +21,7 @@ from panoptic_bev.modules.heads import FPNSemanticHeadDPC as FPNSemanticHeadDPC,
 
 from panoptic_bev.models.backbone_edet.efficientdet import EfficientDet
 from panoptic_bev.models.panoptic_bev_ts import PanopticBevNetTs, NETWORK_INPUTS
+from panoptic_bev.models.panoptic_bev_jit import PanopticBevNetJIT, NETWORK_INPUTS
 
 from panoptic_bev.algos.transformer import TransformerVFAlgo, TransformerVFLoss, TransformerRegionSupervisionLoss
 from panoptic_bev.algos.instance_seg_ts import InstanceSegAlgoFPN_JIT
@@ -44,7 +45,8 @@ from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 # from thop import profile
 
-g_run_multi_view=True
+g_run_multi_view = True
+g_run_model_jit = False
 
 parser = argparse.ArgumentParser(description="Panoptic BEV Evaluation Script")
 parser.add_argument("--local_rank", required=True, type=int)
@@ -326,15 +328,21 @@ def make_model(args, config, num_thing, num_stuff):
     po_loss = None
     po_fusion_algo = PanopticFusionAlgo(po_loss, classes["stuff"], classes["thing"], 1)
 
+    panoptic_bev_jit = PanopticBevNetJIT(out_shape=out_shape, tfm_scales=tfm_scales)
+    # model_jit = torch.jit.script(panoptic_bev_jit)
+    # frozen_model = torch.jit.freeze(model_jit)
+    # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_2.pt")
+
     # Create the BEV network
-    return PanopticBevNetTs(body, bev_transformer, rpn_head, roi_head, sem_head, transformer_algo, rpn_algo, roi_algo,
-                          sem_algo, po_fusion_algo, args.test_dataset, classes=classes,
-                          front_vertical_classes=transformer_config.getstruct("front_vertical_classes"),
-                          front_flat_classes=transformer_config.getstruct("front_flat_classes"),
-                          bev_vertical_classes=transformer_config.getstruct('bev_vertical_classes'),
-                          bev_flat_classes=transformer_config.getstruct("bev_flat_classes"),
-                          out_shape=out_shape,
-                          tfm_scales=tfm_scales)
+    # return PanopticBevNetTs(body, bev_transformer, rpn_head, roi_head, sem_head, transformer_algo, rpn_algo, roi_algo,
+    #                       sem_algo, po_fusion_algo, args.test_dataset, classes=classes,
+    #                       front_vertical_classes=transformer_config.getstruct("front_vertical_classes"),
+    #                       front_flat_classes=transformer_config.getstruct("front_flat_classes"),
+    #                       bev_vertical_classes=transformer_config.getstruct('bev_vertical_classes'),
+    #                       bev_flat_classes=transformer_config.getstruct("bev_flat_classes"),
+    #                       out_shape=out_shape,
+    #                       tfm_scales=tfm_scales)
+    return panoptic_bev_jit
 
 
 def freeze_modules(args, model):
@@ -406,16 +414,51 @@ def log_iter(mode, meters, time_meters, results, metrics, batch=True, **kwargs):
     plogging.iteration(kwargs["summary"], mode, kwargs["global_step"], kwargs["epoch"] + 1, kwargs["num_epochs"],
                       kwargs['curr_iter'], kwargs['num_iters'], OrderedDict(log_entries))
 
+def test_jit_model():
+    jit_path = "../jit/panoptic_bev_gpu_768.pt"
+    device=torch.device('cuda:0')
+    # device=torch.device('cpu')
+    B = 1
+    N = 6
+    img = torch.rand(size=(B,N,3,448,768), dtype=torch.float, device=device)
+    calib = torch.rand(size=(B,N,3,3), dtype=torch.float, device=device)
+    extrinsics = torch.rand(size=(B,N,2,3), dtype=torch.float, device=device)
+    valid_msk = torch.randint(low=0, high=2, size=(B,N,896,768), dtype=torch.uint8, device=device)
+
+    print("[{}], load jit model: {}".format(time.time(), jit_path))
+    jit_model = torch.jit.load(jit_path)
+    # jit_model_cpu = jit_model_gpu.cpu()
+    # warm-up stage: do optimization for given input
+    with torch.jit.optimized_execution(True):
+        with torch.no_grad():
+            for idx in range(2):
+                results = jit_model(img, calib, extrinsics, valid_msk)
+    
+    LOOP = 100
+    start_time = time.time()
+    with torch.jit.optimized_execution(True):
+        with torch.no_grad():
+            for idx in range(LOOP):
+                print("[{}], idx-{}, input img: {}".format(time.time(), idx, img.shape))
+                results = jit_model(img, calib, extrinsics, valid_msk)
+                # print("test jit model, results: {}".format(results))
+                print("[{}], idx-{}, inference done".format(time.time(), idx))
+    end_time = time.time()
+    print("{}-loop total inference time: {}, average time: {}".format(LOOP, (end_time-start_time), (end_time-start_time)/LOOP))
 
 def test(model, dataloader, **varargs):
     global g_bev_visualizer
+
+    if g_run_model_jit:
+        model_jit = torch.jit.load("../jit/panoptic_bev_gpu.pt")
+    else:
+        model.eval()
 
     fuser = FuseConvBn()
     # fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
     # fuser.do_bn_fusion_v2(model, bn_name="InPlaceABNSync")
     # logger.info("final model after fusion: {}".format(model))
 
-    model.eval()
 
     num_stuff = dataloader.dataset.num_stuff
     num_thing = dataloader.dataset.num_thing
@@ -456,7 +499,7 @@ def test(model, dataloader, **varargs):
 
     for it, sample in enumerate(dataloader):
         # eval with front-100 images
-        if it > 50:
+        if it > 5:
             break
 
         do_loss=False
@@ -476,15 +519,30 @@ def test(model, dataloader, **varargs):
             batch_time = time.time()
 
             # Run network
+            loop = 1
+            if it > 4:
+                loop = 100
             # results = model(**sample)
-            logger.info("inputs img: {}, calib: {}, extrinsics: {}, valid_msk: {}".format(sample["img"].shape, sample["calib"].shape, sample["extrinsics"].shape, sample["valid_msk"].shape))
+            logger.debug("inputs img: {}, calib: {}, extrinsics: {}, valid_msk: {}".format(sample["img"].shape, sample["calib"].shape, sample["extrinsics"].shape, sample["valid_msk"].shape))
             inputs = (sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
-            results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+            if g_run_model_jit:
+                results = model_jit(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+            else:
+                results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"], loop)
             # break
 
-            # model_ts = torch.jit.trace(model, inputs, check_trace=False, strict=False)
-            # torch.jit.save(model_ts, "./panoptic_bev_gpu.pt")
-            # logger.info("torchscript model saved to ./panoptic_bev_gpu.pt")
+            # model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=False)
+            # frozen_model = torch.jit.optimize_for_inference(model_ts)
+            # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_768.pt")
+            # logger.info("torchscript model saved to ../jit/panoptic_bev_gpu_768.pt")
+            # break
+
+            ### save panoptic_bev_cpu.pt due to Perspective2OrthographicWarper.forward()
+            # device=torch.device('cpu')
+            # model_cpu = model.cpu()
+            # inputs_cpu = (inputs[0].to(device), inputs[1].to(device), inputs[2].to(device), inputs[3].to(device))
+            # model_cpu_ts = torch.jit.trace(model_cpu, inputs_cpu, strict=False, check_trace=True)
+            # torch.jit.save(model_cpu_ts, "../jit/panoptic_bev_cpu.pt")
             # break
 
             # macs, params = profile(model, inputs)
@@ -540,6 +598,71 @@ def test(model, dataloader, **varargs):
 
     return scores['pq'].item()
 
+def main_jit(args):
+    global g_bev_visualizer
+    if not args.debug:
+        # Initialize multi-processing
+        distributed.init_process_group(backend='nccl', init_method='env://')
+        device_id, device = args.local_rank, torch.device(args.local_rank)
+        rank, world_size = distributed.get_rank(), distributed.get_world_size()
+        torch.cuda.set_device(device_id)
+    else:
+        rank = 0
+        world_size = 1
+        device_id, device = rank, torch.device(rank+3)
+
+    # Create directories
+    if not args.debug:
+        log_dir, saved_models_dir, config_file, vis_dir = create_run_directories(args, rank)
+    else:
+        config_file = os.path.join(args.project_root_dir, "experiments", "config", args.config)
+
+    # Load configuration
+    config = make_config(args, config_file)
+
+    g_bev_visualizer = BevVisualizer(config, vis_dir, n_imgs=6 if g_run_multi_view else 1)
+
+    # Initialize logging only for rank 0
+    if not args.debug and rank == 0:
+        plogging.init(log_dir, "train" if args.mode == 'train' else "test")
+        summary = tensorboard.SummaryWriter(log_dir)
+    else:
+        summary = None
+
+    # Create dataloaders
+    if g_run_multi_view:
+        test_dataloader = make_dataloader_v2(args, config, rank, world_size)
+    else:
+        test_dataloader = make_dataloader(args, config, rank, world_size)
+
+    # Create model
+    model = make_model(args, config, test_dataloader.dataset.num_thing, test_dataloader.dataset.num_stuff)
+    # model.load_trained_params()
+
+    # Init GPU stuff
+    if not args.debug:
+        torch.backends.cudnn.benchmark = config["general"].getboolean("cudnn_benchmark")
+        model = model.cuda(device)
+        # model = DistributedDataParallel(model.cuda(device), device_ids=[device_id], output_device=device_id, find_unused_parameters=True)
+    else:
+        model = model.cuda(device)
+
+    if args.resume:
+        epoch = 0
+        global_step = 0
+
+        log_info("Evaluating epoch %d", epoch + 1, debug=args.debug)
+        score = test(model, test_dataloader, device=device, summary=summary, global_step=global_step,
+                     epoch=epoch, num_epochs=epoch+1, log_interval=config["general"].getint("log_interval"),
+                     loss_weights=config['optimizer'].getstruct("loss_weights"),
+                     front_vertical_classes=config['transformer'].getstruct('front_vertical_classes'),
+                     front_flat_classes=config['transformer'].getstruct('front_flat_classes'),
+                     bev_vertical_classes=config['transformer'].getstruct('bev_vertical_classes'),
+                     bev_flat_classes=config['transformer'].getstruct('bev_flat_classes'),
+                     rgb_mean=config['dataloader'].getstruct('rgb_mean'),
+                     rgb_std=config['dataloader'].getstruct('rgb_std'),
+                     img_scale=config['dataloader'].getfloat('scale'),
+                     debug=args.debug)
 
 def main(args):
     global g_bev_visualizer
@@ -626,4 +749,5 @@ def main(args):
                      debug=args.debug)
 
 if __name__ == "__main__":
-    main(parser.parse_args())
+    main_jit(parser.parse_args())
+    # test_jit_model()
