@@ -427,13 +427,17 @@ def test_jit_model():
 
     print("[{}], load jit model: {}".format(time.time(), jit_path))
     jit_model = torch.jit.load(jit_path)
+    jit_model.eval()
     # jit_model_cpu = jit_model_gpu.cpu()
     # warm-up stage: do optimization for given input
     with torch.jit.optimized_execution(True):
         with torch.no_grad():
             for idx in range(2):
                 results = jit_model(img, calib, extrinsics, valid_msk)
-    
+
+    # onnx_path = "../jit/panoptic_bev_gpu_768.onnx"
+    # torch.onnx.export(jit_model, (img, calib, extrinsics, valid_msk), onnx_path, opset_version=10)
+
     LOOP = 100
     start_time = time.time()
     with torch.jit.optimized_execution(True):
@@ -749,5 +753,5 @@ def main(args):
                      debug=args.debug)
 
 if __name__ == "__main__":
-    main_jit(parser.parse_args())
-    # test_jit_model()
+    # main_jit(parser.parse_args())
+    test_jit_model()
