@@ -555,8 +555,11 @@ class EfficientNet(nn.Module):
             if drop_connect_rate:
                 drop_connect_rate *= float(idx) / len(self.model._blocks)
             x = block(x, drop_connect_rate=drop_connect_rate)
-
-            if block._depthwise_conv.stride == [2, 2]:
+            
+            # print("efficientdet _depthwise_conv.stride: {}".format(block._depthwise_conv.stride))
+            # refer to https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch/issues/29
+            # if block._depthwise_conv.stride == [2, 2]:
+            if block._depthwise_conv.stride == (2, 2):
                 feature_maps.append(last_x)
             elif idx == len(self.model._blocks) - 1:
                 feature_maps.append(x)

@@ -39,7 +39,15 @@ class MBConvBlock(nn.Module):
 
         # Depthwise convolution phase
         k = self._block_args.kernel_size
+        # if isinstance(self._block_args.stride, list):
+        #     self._block_args.stride = self._block_args.stride[0]
         s = self._block_args.stride
+        
+        # refer to https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch/issues/29
+        if isinstance(s, list):
+            s = s[0]
+        # print("efficientnet _depthwise_conv stride: {}".format(s))
+
         self._depthwise_conv = Conv2d(
             in_channels=oup, out_channels=oup, groups=oup,  # groups makes it depthwise
             kernel_size=k, stride=s, bias=False)
