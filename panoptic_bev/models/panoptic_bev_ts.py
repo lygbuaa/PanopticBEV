@@ -11,12 +11,12 @@ logger = plogging.get_logger()
 
 NETWORK_INPUTS = ["img", "calib", "extrinsics", "valid_msk"]
 #False: turn_off jit, True: use jit inference
-g_toggle_body_jit = True
-g_toggle_transformer_jit = True
-g_toggle_rpn_jit = True
-g_toggle_roi_jit = True
-g_toggle_semantic_jit = True
-g_toggle_po_jit = True
+g_toggle_body_jit = False
+g_toggle_transformer_jit = False
+g_toggle_rpn_jit = False
+g_toggle_roi_jit = False
+g_toggle_semantic_jit = False
+g_toggle_po_jit = False
 
 class PanopticBevNetTs(nn.Module):
     def __init__(self,
@@ -46,6 +46,8 @@ class PanopticBevNetTs(nn.Module):
         if g_toggle_body_jit:
             self.body_jit = torch.jit.load(self.body_jit_path)
             logger.debug("load encoder: {}".format(self.body_jit_path))
+
+        self.body_onnx_path = "../onnx/body_encoder_op13.onnx"
 
         # Transformer
         self.transformer = transformer
@@ -146,9 +148,12 @@ class PanopticBevNetTs(nn.Module):
             #     debug_str += tmp_str
             # logger.debug(debug_str)
 
-            # body_ts = torch.jit.trace(self.body, (image), check_trace=True)
-            # torch.jit.save(body_ts, self.body_jit_path)
-            # return
+            body_ts = torch.jit.trace(self.body, (image), check_trace=True)
+            torch.jit.save(body_ts, self.body_jit_path)
+            sys.exit(0)
+
+            torch.onnx.export(self.body, image, self.body_onnx_path, opset_version=13, verbose=True)
+            sys.exit(0)
 
             # Transform from the front view to the BEV and upsample the height dimension
             if g_toggle_transformer_jit:

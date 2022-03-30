@@ -5,6 +5,8 @@ import torch.utils.checkpoint as checkpoint
 from panoptic_bev.algos.po_fusion_ts import po_inference
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
+sys.path.append("/home/hugoliu/github/PanopticBEV/onnx/script")
+from onnx_wrapper import OnnxWrapper
 
 
 NETWORK_INPUTS = ["img", "calib", "extrinsics", "valid_msk"]
@@ -16,6 +18,9 @@ class PanopticBevNetJIT(nn.Module):
         self.body_jit_path = "../jit/body_encoder.pt"
         self.body_jit = torch.jit.load(self.body_jit_path)
         logger.debug("load encoder: {}".format(self.body_jit_path))
+
+        self.body_onnx_path = "../onnx/body_encoder_op13_sim.onnx"
+        self.body_onnx = OnnxWrapper(self.body_onnx_path)
 
         # Transformer
         self.transformer_jit_path = "../jit/ms_transformer.pt"
@@ -79,9 +84,13 @@ class PanopticBevNetJIT(nn.Module):
             start_time = time.time()
             logger.debug("encoder-in, {}".format(start_time))
             for i in range(LOOP):
-                ms_feat = self.body_jit(image)
+                # ms_feat = self.body_jit(image)
+                ms_feat = self.body_onnx.run([image])
             end_time = time.time()
             logger.debug("encoder-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
+
+            # torch.onnx.export(self.body_jit, image, self.body_onnx_path, opset_version=13, verbose=True)
+            # sys.exit(0)
 
             # debug_str = "ms_feat: "
             # for i, f in enumerate(ms_feat):

@@ -9,6 +9,7 @@ import torch.utils.data as data
 from torch import distributed
 import inplace_abn
 from inplace_abn import ABN
+# import torch_tensorrt
 
 from panoptic_bev.config import load_config
 
@@ -428,15 +429,25 @@ def test_jit_model():
     print("[{}], load jit model: {}".format(time.time(), jit_path))
     jit_model = torch.jit.load(jit_path)
     jit_model.eval()
+
+    # onnx_path = "../jit/panoptic_bev_gpu_768.onnx"
+    # torch.onnx.export(jit_model, (img, calib, extrinsics, valid_msk), onnx_path, opset_version=12)
+
+    # trt_model_fp32 = torch_tensorrt.compile(
+    #     module=jit_model, 
+    #     inputs=[torch_tensorrt.Input((B,N,3,448,768), dtype=torch.float32), torch_tensorrt.Input((B,N,3,3), dtype=torch.float32), torch_tensorrt.Input((B,N,2,3), dtype=torch.float32), torch_tensorrt.Input((B,N,896,768), dtype=torch.float32)], 
+    #     enabled_precisions={torch.float32},
+    #     workspace_size=1<<22
+    # )
+    # torch.jit.save(trt_model_fp32, "./trt_model_fp32.trt")
+    # print("trt_model_fp32 saved")
+
     # jit_model_cpu = jit_model_gpu.cpu()
     # warm-up stage: do optimization for given input
     with torch.jit.optimized_execution(True):
         with torch.no_grad():
             for idx in range(2):
                 results = jit_model(img, calib, extrinsics, valid_msk)
-
-    # onnx_path = "../jit/panoptic_bev_gpu_768.onnx"
-    # torch.onnx.export(jit_model, (img, calib, extrinsics, valid_msk), onnx_path, opset_version=10)
 
     LOOP = 100
     start_time = time.time()
@@ -503,7 +514,7 @@ def test(model, dataloader, **varargs):
 
     for it, sample in enumerate(dataloader):
         # eval with front-100 images
-        if it > 5:
+        if it > 10:
             break
 
         do_loss=False
@@ -532,7 +543,7 @@ def test(model, dataloader, **varargs):
             if g_run_model_jit:
                 results = model_jit(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
             else:
-                results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"], loop)
+                results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
             # break
 
             # model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=False)
@@ -753,5 +764,5 @@ def main(args):
                      debug=args.debug)
 
 if __name__ == "__main__":
-    # main_jit(parser.parse_args())
-    test_jit_model()
+    main_jit(parser.parse_args())
+    # test_jit_model()
