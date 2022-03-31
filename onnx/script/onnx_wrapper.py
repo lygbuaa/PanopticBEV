@@ -124,12 +124,20 @@ class OnnxWrapper(object):
         result_torch = self.run([image_torch])
         print(result_torch)
 
+    def print_jit(self, jit_path):
+        jit_model = torch.jit.load(jit_path)
+        logger.debug("jit code: {}".format(jit_model.code))
+        logger.debug("jit graph: {}".format(jit_model.graph))
+
+
 if __name__ == "__main__":
     resnet50_path = "./resnet50-v1-12/resnet50-v1-12.onnx"
     encoder_path = "../body_encoder_op13.onnx"
     encoder_sim_path = "../body_encoder_op13_sim.onnx"
+    transformer_jit_path = "../../jit/ms_transformer.pt"
     onwp = OnnxWrapper(resnet50_path)
-    onwp.test_torch()
+    # onwp.test_torch()
     # onwp.simplify_onnx_model(encoder_path)
-    # onwp.test_encoder(encoder_sim_path)
+    onwp.test_encoder(encoder_sim_path)
+    # onwp.print_jit(transformer_jit_path)
 

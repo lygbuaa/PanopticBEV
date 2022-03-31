@@ -7,6 +7,7 @@ from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 sys.path.append("/home/hugoliu/github/PanopticBEV/onnx/script")
 from onnx_wrapper import OnnxWrapper
+from torch.utils.mobile_optimizer import optimize_for_mobile, MobileOptimizerType
 
 
 NETWORK_INPUTS = ["img", "calib", "extrinsics", "valid_msk"]
@@ -20,12 +21,14 @@ class PanopticBevNetJIT(nn.Module):
         logger.debug("load encoder: {}".format(self.body_jit_path))
 
         self.body_onnx_path = "../onnx/body_encoder_op13_sim.onnx"
-        self.body_onnx = OnnxWrapper(self.body_onnx_path)
+        # self.body_onnx = OnnxWrapper(self.body_onnx_path)
 
         # Transformer
         self.transformer_jit_path = "../jit/ms_transformer.pt"
         self.transformer_jit = torch.jit.load(self.transformer_jit_path)
         logger.debug("load transformer: {}".format(self.transformer_jit_path))
+
+        self.transformer_onnx_path = "../onnx/transformer_op13.onnx"
 
         self.rpn_algo_jit_path = "../jit/rpn_algo.pt"
         self.rpn_algo_jit = torch.jit.load(self.rpn_algo_jit_path)
@@ -84,8 +87,8 @@ class PanopticBevNetJIT(nn.Module):
             start_time = time.time()
             logger.debug("encoder-in, {}".format(start_time))
             for i in range(LOOP):
-                # ms_feat = self.body_jit(image)
-                ms_feat = self.body_onnx.run([image])
+                ms_feat = self.body_jit(image)
+                # ms_feat = self.body_onnx.run([image])
             end_time = time.time()
             logger.debug("encoder-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
 
@@ -105,6 +108,12 @@ class PanopticBevNetJIT(nn.Module):
                 ms_bev_tmp = self.transformer_jit(ms_feat, intrin, extrin, msk)
             end_time = time.time()
             logger.debug("transformer-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
+
+            # transformer_jit_opt = optimize_for_mobile(script_module=self.transformer_jit, optimization_blocklist={MobileOptimizerType.INSERT_FOLD_PREPACK_OPS})
+            # transformer_jit_opt.eval()
+            # logger.debug("optimize_for_mobile done")
+            torch.onnx.export(self.transformer_jit, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True)
+            sys.exit(0)
 
             # if ms_bev == None:
             #     ms_bev = ms_bev_tmp

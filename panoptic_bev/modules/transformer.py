@@ -5,11 +5,13 @@ import torch, math, sys
 # from kornia.geometry.transform import warp_perspective
 from panoptic_bev.utils.kornia_geometry import warp_perspective
 from inplace_abn import ABN
+from panoptic_bev.utils.fake_ops import fake_grid_sample, fake_rot90, fake_deg2rad, fake_affine_grid, fake_warp_perspective
 
 from panoptic_bev.utils.transformer_ts import get_init_homography
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 
+g_onnx_fake_ops = False
 
 class VerticalTransformer(nn.Module):
     def __init__(self, in_ch, v_2d_ch, v_3d_ch, img_size_in, img_size_out, extents, img_scale, resolution, norm_act=ABN):
@@ -155,19 +157,30 @@ class FlatTransformer(nn.Module):
         
         theta_ipm = g_create_theta_ipm(intrinsics, self.extrinsics, self.px_per_metre, torch.tensor(self.img_scale), self.out_img_size_reverse, torch.tensor(feat.shape[0]))
         # print("feat device: {}, theta_ipm device: {}".format(feat.device, theta_ipm.device))
-        # feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]), fill_value=torch.zeros(3, device=feat.device))
-        feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
-        feat_bev_ipm = torch.rot90(feat_bev_ipm, k=2, dims=[2, 3])
+        if g_onnx_fake_ops:
+            feat_bev_ipm = fake_warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
+        else:
+            feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
+        # logger.debug("feat: {}, theta_ipm: {}, Z_out: {}, W_out: {}, feat_bev_ipm: {}".format(feat.shape, theta_ipm.shape, self.Z_out, self.W_out, feat_bev_ipm.shape))
+        if g_onnx_fake_ops:
+            feat_bev_ipm = fake_rot90(feat_bev_ipm, k=2, dims=[2, 3])
+        else:
+            feat_bev_ipm = torch.rot90(feat_bev_ipm, k=2, dims=[2, 3])
 
         # Find the regions where IPM goes wrong and apply the ECN to those regions
         ipm_f_logits = self.ipm_confident_region_estimation(feat_bev_ipm)  # Get the logits where the IPM is "confident"
         ipm_incorrect = 1 - ipm_f_logits.sigmoid()  # Get the mask where the IPM is assumed to be incorrect
 
         # Convert the incorrect mask back into the FV and use it to get the erroneous features in the FV
-        ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
-        # ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]), fill_value=torch.zeros(3, device=feat.device))
-        ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
-        # ipm_incorrect_fv = kornia_warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]], dtype=torch.int), fill_value=torch.zeros(3, device=feat.device))
+        if g_onnx_fake_ops:
+            ipm_incorrect = fake_rot90(ipm_incorrect, k=2, dims=[2, 3])
+        else:
+            ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
+        if g_onnx_fake_ops:
+            ipm_incorrect_fv = fake_warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
+        else:
+            ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
+        # logger.debug("ipm_incorrect: {}, theta_ipm: {}, feat: {}, ipm_incorrect_fv: {}".format(ipm_incorrect.shape, theta_ipm.shape, feat.shape, ipm_incorrect_fv.shape))
         feat_ecm_fv = (feat * ipm_incorrect_fv)
 
         # Add the regions that are ignored by the IPM algorithm --> Regions above the principal point.
@@ -251,7 +264,11 @@ class Perspective2OrthographicWarper(nn.Module):
 
         # Resample 3D feature map
         grid_coords = torch.stack([ucoords, zcoords], -1).clamp(-1.1, 1.1)
-        return F.grid_sample(features, grid_coords, align_corners=False)
+
+        if g_onnx_fake_ops:
+            return fake_grid_sample(features, grid_coords)
+        else:
+            return F.grid_sample(features, grid_coords, align_corners=False)
 
 
     def _make_grid(self, extents, resolution):
@@ -339,7 +356,10 @@ class TransformerVF(nn.Module):
 
         # In the merged features, the ego car is at the bottom and something far away is at the top.
         # Rotate it to match the output --> The ego car is on the left and something far away is towards the right
-        feat_merged = torch.rot90(feat_merged, k=1, dims=[2, 3])
+        if g_onnx_fake_ops:
+            feat_merged = fake_rot90(feat_merged, k=1, dims=[2, 3])
+        else:
+            feat_merged = torch.rot90(feat_merged, k=1, dims=[2, 3])
         # v_region_logits = torch.rot90(v_region_logits, k=1, dims=[2, 3])
         # f_region_logits = torch.rot90(f_region_logits, k=1, dims=[2, 3])
 
@@ -372,13 +392,21 @@ class TransformerVF(nn.Module):
 
         return feat_merged #, vf_logits, v_region_logits, f_region_logits
 
-@torch.jit.script
+# @torch.jit.script
 def feat_affine(feat, angle, tx, ty):
     # angle = angle*math.pi/180.0
-    angle = torch.deg2rad(angle)
+    # angle = torch.deg2rad(angle)
+    angle = fake_deg2rad(angle)
     theta = torch.stack([torch.stack([torch.cos(angle), torch.sin(-angle), tx]),torch.stack([torch.sin(angle), torch.cos(angle), ty])], dim=0)
-    grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
-    return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False).to(feat.device)
+    if g_onnx_fake_ops:
+        grid = fake_affine_grid(theta.unsqueeze(0), feat)
+    else:
+        grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
+
+    if g_onnx_fake_ops:
+        return fake_grid_sample(feat, grid)
+    else:
+        return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False).to(feat.device)
 
 def g_create_theta_ipm(intrinsics, extrinsics, px_per_metre, img_scale, out_img_size_reverse, fshape=0):
     # self.theta_ipm = torch.tensor([[[-2.1252e-02, -3.8398e-01,  2.5564e+01],

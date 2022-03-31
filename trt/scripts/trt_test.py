@@ -5,6 +5,7 @@ import os, sys, time
 import numpy as np
 import torch
 import torchvision
+# pip3 install torch-tensorrt -f https://github.com/NVIDIA/Torch-TensorRT/releases
 import torch_tensorrt
 
 
@@ -35,7 +36,7 @@ def benchmark(model, input_data, nwarmup=10, nruns=10000):
                 print('Iteration %d/%d, ave batch time %.2f ms'%(i, nruns, np.mean(timings)*1000))
 
     print("Input shape:", input_data.size())
-    print("Output features size:", features.size())
+    # print("Output features size:", features.size())
     print('Average batch time: %.2f ms'%(np.mean(timings)*1000))
 
 def make_calibrator():
@@ -94,7 +95,7 @@ def test_resnet_trt():
         workspace_size=1<<22
     )
     benchmark(trt_model_fp32, input_fp32, nwarmup=100, nruns=100)
-    torch.jit.save(script_model, "./resnet50_fp32.trt")
+    torch.jit.save(trt_model_fp32, "./resnet50_fp32.trt")
 
     print("###### benchmark trt.fp16.resnet50 ######")
     trt_model_fp16 = torch_tensorrt.compile(
@@ -104,7 +105,7 @@ def test_resnet_trt():
         workspace_size=1<<22
     )
     benchmark(trt_model_fp16, input_fp16, nwarmup=100, nruns=100)
-    torch.jit.save(script_model, "./resnet50_fp16.jit")
+    torch.jit.save(trt_model_fp16, "./resnet50_fp16.trt")
 
     print("###### benchmark trt.int8.resnet50 ######")
     calibrator = make_calibrator()
@@ -146,7 +147,26 @@ def test_resnet_int8():
     # support torch.jit.save() & torch.jit.load()
     torch.jit.save(trt_model_int8, "./resnet50_int8.trt")
 
+def test_encoder(jit_path):
+    device=torch.device('cuda:0')
+    input_fp32 = torch.randn((1, 3, 448, 768), dtype=torch.float32, device=device)
+
+    print("###### benchmark jit.fp32.encoder ######")
+    jit_model = torch.jit.load(jit_path)
+    benchmark(jit_model, input_fp32, nwarmup=100, nruns=100)
+
+    print("###### benchmark trt.fp32.encoder ######")
+    trt_model_fp32 = torch_tensorrt.compile(
+        module=jit_model, 
+        inputs=[torch_tensorrt.Input((1, 3, 448, 768), dtype=torch.float32)], 
+        enabled_precisions={torch.float32},
+        workspace_size=1<<32
+    )
+    benchmark(trt_model_fp32, input_fp32, nwarmup=100, nruns=100)
+    # torch.jit.save(trt_model_fp32, "./encoder_fp32.trt")
 
 if __name__ == '__main__':
     print_version()
     test_resnet_trt()
+    # model_path = "../../jit/body_encoder.pt"
+    # test_encoder(model_path)
