@@ -53,6 +53,7 @@ class OnnxWrapper(object):
     def run_onnx_model(self, ortss, inputs):
         input_layers = ortss.get_inputs()
         output_layers = ortss.get_outputs()
+        # logger.debug("input_layers: {}, output_layers: {}".format(input_layers, output_layers))
         input_dict = {}
         output_list = []
         for idx, in_layer in enumerate(input_layers):
@@ -111,6 +112,26 @@ class OnnxWrapper(object):
         # logger.info(result)
         return True
 
+    def test_sem_algo(self, model_path):
+        model = onnx.load(model_path)
+        try:
+            onnx.checker.check_model(model)
+            # logger.info(onnx.helper.printable_graph(model.graph))
+        except Exception as e:
+            logger.error("onnx check model error: {}".format(e))
+            return False
+
+        ortss = self.load_onnx_model(model_path)
+        ms_bev_0 = np.random.rand(1, 256, 224, 384).astype(np.float32)
+        ms_bev_1 = np.random.rand(1, 256, 112, 192).astype(np.float32)
+        ms_bev_2 = np.random.rand(1, 256, 56, 96).astype(np.float32)
+        ms_bev_3 = np.random.rand(1, 256, 28, 48).astype(np.float32)
+        ms_bev=[ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3]
+        self.benchmark(ortss, ms_bev, nwarmup=100, nruns=100)
+        # result = self.run_onnx_model(ortss, [image])
+        # logger.info(result)
+        return True        
+
     def test_resnet50(self, model_path):
         model = onnx.load(model_path)
         onnx.checker.check_model(model)
@@ -135,9 +156,12 @@ if __name__ == "__main__":
     encoder_path = "../body_encoder_op13.onnx"
     encoder_sim_path = "../body_encoder_op13_sim.onnx"
     transformer_jit_path = "../../jit/ms_transformer.pt"
-    onwp = OnnxWrapper(resnet50_path)
+    sem_algo_onnx_path = "../sem_algo_op13.onnx"
+    onwp = OnnxWrapper(sem_algo_onnx_path)
+    onwp.test_sem_algo(sem_algo_onnx_path)
+    # onwp.simplify_onnx_model(sem_algo_onnx_path)
     # onwp.test_torch()
     # onwp.simplify_onnx_model(encoder_path)
-    onwp.test_encoder(encoder_sim_path)
+    # onwp.test_encoder(encoder_sim_path)
     # onwp.print_jit(transformer_jit_path)
 

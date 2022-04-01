@@ -15,7 +15,7 @@ g_toggle_body_jit = False
 g_toggle_transformer_jit = False
 g_toggle_rpn_jit = False
 g_toggle_roi_jit = False
-g_toggle_semantic_jit = False
+g_toggle_semantic_jit = True
 g_toggle_po_jit = False
 
 class PanopticBevNetTs(nn.Module):
@@ -85,6 +85,8 @@ class PanopticBevNetTs(nn.Module):
         if g_toggle_semantic_jit:
             self.sem_algo_jit = torch.jit.load(self.sem_algo_jit_path)
             logger.debug("load sem_algo: {}".format(self.sem_algo_jit_path))
+
+        self.sem_algo_onnx_path = "../onnx/sem_algo_op13.onnx"
 
         self.po_fusion_jit_path = "../jit/po_fusion.pt"
         if g_toggle_po_jit:
@@ -166,8 +168,8 @@ class PanopticBevNetTs(nn.Module):
             # torch.jit.save(transformer_ts, self.transformer_jit_path)
             # sys.exit(0)
 
-            torch.onnx.export(self.transformer, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
-            sys.exit(0)
+            # torch.onnx.export(self.transformer, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
+            # sys.exit(0)
 
 
             # if ms_bev == None:
@@ -204,12 +206,15 @@ class PanopticBevNetTs(nn.Module):
 
         # Segmentation Part
         if g_toggle_semantic_jit:
-            sem_pred, sem_logits = self.sem_algo_jit(ms_bev, self.valid_size_t, self.img_size_t)
+            sem_pred, sem_logits = self.sem_algo_jit(ms_bev)
         else:
             # sem_pred, sem_logits, _ = self.sem_algo.inference(self.sem_head, ms_bev, self.valid_size, self.img_size)
-            sem_pred, sem_logits = self.sem_algo(ms_bev, self.valid_size_t, self.img_size_t)
-        # sem_algo_ts = torch.jit.trace(self.sem_algo, (ms_bev, self.valid_size_t, self.img_size_t), check_trace=True)
+            sem_pred, sem_logits = self.sem_algo(ms_bev)
+        # sem_algo_ts = torch.jit.trace(self.sem_algo, ([ms_bev]), check_trace=True)
         # torch.jit.save(sem_algo_ts, self.sem_algo_jit_path)
+        # sys.exit(0)
+
+        # torch.onnx.export(self.sem_algo, ms_bev, self.sem_algo_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
         # sys.exit(0)
 
         # Panoptic Fusion. Fuse the semantic and instance predictions to generate a coherent output

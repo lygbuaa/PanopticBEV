@@ -97,12 +97,13 @@ class SemanticSegAlgo(torch.nn.Module):
         Number of classes
     """
 
-    def __init__(self, head, loss, num_classes, ignore_index=255):
+    def __init__(self, head, loss, num_classes, img_size, ignore_index=255):
         super(SemanticSegAlgo, self).__init__()
         self.loss = loss
         self.head = head
         self.num_classes = num_classes
         self.ignore_index = ignore_index
+        self.img_size = img_size
 
     @staticmethod
     def _pack_logits(sem_logits, valid_size, img_size):
@@ -129,7 +130,7 @@ class SemanticSegAlgo(torch.nn.Module):
     #     sem_logits, sem_feat, roi_logits = head(x, bbx, img_size, roi)
     #     return sem_logits, sem_feat, roi_logits
 
-    def forward(self, x, valid_size, img_size):
+    def forward(self, x):
         """Given input features compute semantic segmentation prediction
 
         Parameters
@@ -149,11 +150,11 @@ class SemanticSegAlgo(torch.nn.Module):
             A sequence of N tensors of semantic segmentations with shapes H_i x W_i
         """
         # sem_logits_, sem_feat, _ = self._logits(x, None, img_size, False)
-        sem_logits_, _, _  = self.head(x, None, img_size, False)
+        sem_logits_, _, _  = self.head(x, None, self.img_size, False)
         # sem_logits = self._pack_logits(sem_logits_, valid_size, img_size)
         # logger.debug("sem_head output sem_logits_: {}".format(sem_logits_.shape))
 
-        sem_logits = functional.interpolate(sem_logits_, size=img_size.tolist(), mode="bilinear", align_corners=False)
+        sem_logits = functional.interpolate(sem_logits_, size=self.img_size.tolist(), mode="bilinear", align_corners=False)
         # logger.debug("interpolation output sem_logits: {}".format(sem_logits.shape))
 
         # sem_logits = pack_padded_images(sem_logits, valid_size)

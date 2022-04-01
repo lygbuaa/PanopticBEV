@@ -316,6 +316,7 @@ def make_model(args, config, num_thing, num_stuff):
     Z_out = int(dl_config.getstruct("bev_crop")[1] * dl_config.getfloat("scale"))
     out_shape = (W_out, Z_out)
     sem_loss = None
+    sem_img_size = torch.tensor([W_out, Z_out*2])
     sem_head = FPNSemanticHeadDPC(transformer_config.getint("bev_ms_channels"),
                                   sem_config.getint("fpn_min_level"),
                                   sem_config.getint("fpn_levels"),
@@ -323,7 +324,7 @@ def make_model(args, config, num_thing, num_stuff):
                                   out_size=out_shape,
                                   pooling_size=sem_config.getstruct("pooling_size"),
                                   norm_act=norm_act_static)
-    sem_algo = SemanticSegAlgo(sem_head, sem_loss, classes["total"])
+    sem_algo = SemanticSegAlgo(sem_head, sem_loss, classes["total"], sem_img_size)
 
     # Panoptic fusion algorithm
     po_loss = None
@@ -335,15 +336,15 @@ def make_model(args, config, num_thing, num_stuff):
     # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_2.pt")
 
     # Create the BEV network
-    # return PanopticBevNetTs(body, bev_transformer, rpn_head, roi_head, sem_head, transformer_algo, rpn_algo, roi_algo,
-    #                       sem_algo, po_fusion_algo, args.test_dataset, classes=classes,
-    #                       front_vertical_classes=transformer_config.getstruct("front_vertical_classes"),
-    #                       front_flat_classes=transformer_config.getstruct("front_flat_classes"),
-    #                       bev_vertical_classes=transformer_config.getstruct('bev_vertical_classes'),
-    #                       bev_flat_classes=transformer_config.getstruct("bev_flat_classes"),
-    #                       out_shape=out_shape,
-    #                       tfm_scales=tfm_scales)
     return panoptic_bev_jit
+    return PanopticBevNetTs(body, bev_transformer, rpn_head, roi_head, sem_head, transformer_algo, rpn_algo, roi_algo,
+                          sem_algo, po_fusion_algo, args.test_dataset, classes=classes,
+                          front_vertical_classes=transformer_config.getstruct("front_vertical_classes"),
+                          front_flat_classes=transformer_config.getstruct("front_flat_classes"),
+                          bev_vertical_classes=transformer_config.getstruct('bev_vertical_classes'),
+                          bev_flat_classes=transformer_config.getstruct("bev_flat_classes"),
+                          out_shape=out_shape,
+                          tfm_scales=tfm_scales)
 
 
 def freeze_modules(args, model):

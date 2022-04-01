@@ -42,6 +42,9 @@ class PanopticBevNetJIT(nn.Module):
         self.sem_algo_jit = torch.jit.load(self.sem_algo_jit_path)
         logger.debug("load sem_algo: {}".format(self.sem_algo_jit_path))
 
+        self.sem_algo_onnx_path = "../onnx/sem_algo_op13.onnx"
+        self.sem_algo_onnx = OnnxWrapper(self.sem_algo_onnx_path)
+
         self.po_fusion_jit_path = "../jit/po_fusion.pt"
         self.po_fusion_jit = torch.jit.load(self.po_fusion_jit_path)
         logger.debug("load po_fusion: {}".format(self.po_fusion_jit_path))
@@ -112,8 +115,8 @@ class PanopticBevNetJIT(nn.Module):
             # transformer_jit_opt = optimize_for_mobile(script_module=self.transformer_jit, optimization_blocklist={MobileOptimizerType.INSERT_FOLD_PREPACK_OPS})
             # transformer_jit_opt.eval()
             # logger.debug("optimize_for_mobile done")
-            torch.onnx.export(self.transformer_jit, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True)
-            sys.exit(0)
+            # torch.onnx.export(self.transformer_jit, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True)
+            # sys.exit(0)
 
             # if ms_bev == None:
             #     ms_bev = ms_bev_tmp
@@ -144,7 +147,8 @@ class PanopticBevNetJIT(nn.Module):
         start_time = time.time()
         logger.debug("sem-in, {}".format(start_time))
         for i in range(LOOP):
-            sem_pred, sem_logits = self.sem_algo_jit(ms_bev, self.valid_size_t, self.img_size_t)
+            # sem_pred, sem_logits = self.sem_algo_jit(ms_bev)
+            sem_pred, sem_logits = self.sem_algo_onnx.run(ms_bev)
         end_time = time.time()
         logger.debug("sem-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
 
