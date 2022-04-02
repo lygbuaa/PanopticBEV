@@ -5,6 +5,9 @@ from panoptic_bev.utils.sequence import pad_packed_images
 from panoptic_bev.utils.parallel.packed_sequence import PackedSequence
 import torch.utils.checkpoint as checkpoint
 from panoptic_bev.algos.po_fusion_ts import po_inference
+from panoptic_bev.algos.po_fusion_onnx import Pofusion_ONNX
+sys.path.append("/home/hugoliu/github/PanopticBEV/onnx/script")
+from onnx_wrapper import OnnxWrapper
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 
@@ -15,8 +18,9 @@ g_toggle_body_jit = False
 g_toggle_transformer_jit = False
 g_toggle_rpn_jit = False
 g_toggle_roi_jit = False
-g_toggle_semantic_jit = True
+g_toggle_semantic_jit = False
 g_toggle_po_jit = False
+g_toggle_po_onnx = False
 
 class PanopticBevNetTs(nn.Module):
     def __init__(self,
@@ -87,11 +91,19 @@ class PanopticBevNetTs(nn.Module):
             logger.debug("load sem_algo: {}".format(self.sem_algo_jit_path))
 
         self.sem_algo_onnx_path = "../onnx/sem_algo_op13.onnx"
-
         self.po_fusion_jit_path = "../jit/po_fusion.pt"
         if g_toggle_po_jit:
             self.po_fusion_jit = torch.jit.load(self.po_fusion_jit_path)
             logger.debug("load po_fusion: {}".format(self.po_fusion_jit_path))
+       
+        self.po_fusion_onnx_path = "../onnx/po_fusion_op13.onnx"
+
+        if g_toggle_po_onnx:
+            self.po_fusion_onnx = OnnxWrapper(self.po_fusion_onnx_path)
+        
+        # self.po_fusion = Pofusion_ONNX()
+        # self.po_fusion_script = torch.jit.script(self.po_fusion)
+        # torch.jit.save(self.po_fusion_script, self.po_fusion_jit_path)
 
         # Params
         self.dataset = dataset
@@ -118,7 +130,7 @@ class PanopticBevNetTs(nn.Module):
         self.rpn_algo.set_head(self.rpn_head)
 
     def forward(self, img, calib=None, extrinsics=None, valid_msk=None):
-        result = OrderedDict()
+        
         # logger.info("img PackedSequence __len__(): {}, extrinsics len: {}, valid_msk len: {}".format(img.__len__(), len(extrinsics), len(valid_msk)))
             # logger.debug("panoptic_bev input, img: {},  cat:{}, iscrowd: {}, bbx: {}, do_loss: {}, do_prediction: {}".format(img, bev_msk, front_msk, weights_msk, cat, iscrowd, bbx, do_loss, do_prediction))
 
@@ -221,6 +233,7 @@ class PanopticBevNetTs(nn.Module):
         # The first channel of po_pred contains the semantic labels
         # The second channel contains the instance masks with the instance label being the corresponding semantic label
         # po_pred, _, _ = self.po_fusion_algo.inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size)
+
         bbx_pred = torch.stack(bbx_pred, dim=0)
         cls_pred = torch.stack(cls_pred, dim=0)
         roi_msk_logits = torch.stack(roi_msk_logits, dim=0)
@@ -228,13 +241,23 @@ class PanopticBevNetTs(nn.Module):
         
         if g_toggle_po_jit:
             po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+        elif g_toggle_po_onnx:
+            # onnxruntime load model failed, problem with torch.unique, torch.loop
+            self.po_fusion_onnx.run([sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t])
         else:
             po_pred = po_inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+            # po_pred = self.po_fusion_script(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
         # torch.jit.save(po_inference, self.po_fusion_jit_path)
         # sys.exit(0)
 
+        # torch.onnx.export(self.po_fusion, (sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t), self.po_fusion_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
+        # sys.exit(0)
+
+        return [bbx_pred[0], cls_pred[0], obj_pred[0], sem_pred, po_pred[0], po_pred[1], po_pred[2]]
+
         # Prepare outputs
         # PREDICTIONS
+        result = OrderedDict()
         result['bbx_pred'] = bbx_pred[0]
         result['cls_pred'] = cls_pred[0]
         result['obj_pred'] = obj_pred[0]

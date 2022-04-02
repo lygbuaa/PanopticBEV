@@ -201,6 +201,7 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         self.max_predictions = max_predictions
         self.head_bbx = torch.jit.load("../jit/roi_head_bbx.pt")
         self.head_msk = torch.jit.load("../jit/roi_head_msk.pt")
+        # self.use_jit_head = True
 
     @staticmethod
     def _split_and_clip(boxes:torch.Tensor, scores:torch.Tensor, index:torch.Tensor, valid_size:List[torch.Tensor]):
@@ -302,6 +303,13 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
 
         return msk_gt_list
 
+    def return_empty(self):
+        bbx_empty = torch.empty([0, 4], dtype=torch.float)
+        cls_empty = torch.empty([0], dtype = torch.int)
+        obj_empty = torch.empty([0], dtype = torch.float)
+        roi_msk_empty = torch.empty([0, 4, 28, 28], dtype=torch.float)
+        return [bbx_empty], [cls_empty], [obj_empty], [roi_msk_empty]
+
     def forward(self, x:List[torch.Tensor], proposals:List[torch.Tensor], valid_size:List[torch.Tensor], img_size:torch.Tensor):
         x = x[self.min_level:self.min_level + self.levels]
         bbx_pred = []
@@ -310,7 +318,8 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         msk_logits = []
 
         if len(proposals) < 1:
-            return bbx_pred, cls_pred, obj_pred, msk_logits
+            # return bbx_pred, cls_pred, obj_pred, msk_logits
+            return self.return_empty()
 
         # proposals_2 = torch.cat(proposals)
         # logger.debug("1- proposals: {}".format(proposals_2.shape))
@@ -334,7 +343,8 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         # Split boxes and scores by image, clip to valid size
         boxes, scores = self._split_and_clip(boxes, scores, proposals_idx, valid_size)
         if len(boxes) < 1 or len(scores) < 1:
-            return bbx_pred, cls_pred, obj_pred, msk_logits
+            # return bbx_pred, cls_pred, obj_pred, msk_logits
+            return self.return_empty()
         boxes = torch.stack(boxes, dim=0)
         scores = torch.stack(scores, dim=0)
         # Do nms to find final predictions
@@ -344,7 +354,8 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         # logger.debug("PredictionGenerator, bbx_pred: {}, cls_pred: {}, obj_pred: {}".format(bbx_pred, cls_pred, obj_pred))
 
         if len(bbx_pred) < 1:
-            return bbx_pred, cls_pred, obj_pred, msk_logits
+            # return bbx_pred, cls_pred, obj_pred, msk_logits
+            return self.return_empty()
 
         # bbx_pred = PackedSequence(bbx_pred)
         # cls_pred = PackedSequence(cls_pred)

@@ -278,19 +278,19 @@ class FuseConvBn(object):
     def do_bn_fusion_v2(self, model, bn_name="SyncBatchNorm", placeholder=torch.nn.Identity()):
         bn_counter = 0
         for n, m in model.named_modules():
-            # if isinstance(m, torch.nn.Conv2d):
-            next_bn = self.compute_next_bn(n, model, bn_name)
-            # logger.info("enumerate, n: {}, m: {}, next_bn: {}".format(n, m, next_bn))
-            if next_bn is not None:
-                next_bn_ = self.extract_layer(model, next_bn)
-                if bn_name=="SyncBatchNorm":
-                    self.fuse_bn_to_conv(next_bn_, m)
-                elif bn_name == "InPlaceABNSync":
-                    self.fuse_abn_to_conv(next_bn_, m)
-                    placeholder = self.make_placeholder(next_bn_)
-                self.set_layer(model, next_bn, placeholder)
-                bn_counter += 1
-                # logger.info("fuse {}".format(next_bn_))
+            #if isinstance(m, torch.nn.Conv3d): #Conv2d, Conv3d, Linear, ConvTranspose2d
+                next_bn = self.compute_next_bn(n, model, bn_name)
+                # logger.info("enumerate, n: {}, m: {}, next_bn: {}".format(n, m, next_bn))
+                if next_bn is not None:
+                    next_bn_ = self.extract_layer(model, next_bn)
+                    if bn_name=="SyncBatchNorm":
+                        self.fuse_bn_to_conv(next_bn_, m)
+                    elif bn_name == "InPlaceABNSync":
+                        self.fuse_abn_to_conv(next_bn_, m)
+                        placeholder = self.make_placeholder(next_bn_)
+                    self.set_layer(model, next_bn, placeholder)
+                    bn_counter += 1
+                    # logger.info("fuse {}".format(next_bn_))
         # logger.info("final model after fusion: {}".format(model))
         logger.info("fused {} bn layer".format(bn_counter))
         return model

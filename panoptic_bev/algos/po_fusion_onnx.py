@@ -1,11 +1,8 @@
 import torch
 import torch.nn.functional as F
+from panoptic_bev.utils.parallel import PackedSequence
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
-
-@torch.jit.script
-def is_empty_tensor(x:torch.Tensor):
-    return len(x) < 1
 
 @torch.jit.script
 def po_process_semantic_logits(sem_logits:torch.Tensor, boxes:torch.Tensor, classes:torch.Tensor, po_num_stuff:int=6, po_num_thing:int=4, po_sem_stride:int=1):
@@ -20,9 +17,6 @@ def po_process_semantic_logits(sem_logits:torch.Tensor, boxes:torch.Tensor, clas
         if (bbx_i is None) or (cat_i is None):
             po_logits_stuff.append(po_logits_stuff_i)
             po_logits_inst.append(None)
-        elif is_empty_tensor(bbx_i) or is_empty_tensor(cat_i):
-            po_logits_stuff.append(po_logits_stuff_i)
-            po_logits_inst.append(torch.empty([0], dtype=torch.float))
         else:
             bbx_i = bbx_i / po_sem_stride
 
@@ -63,16 +57,15 @@ def po_process_mask_logits(sem_logits:torch.Tensor, roi_msk_logits:torch.Tensor,
                 h = max((y_max - y_min + 1), 1)
 
                 roi_edge = masks_i.shape[2]
-                mask = F.upsample(masks_i[box_id, :, :].view(1, 1, roi_edge, roi_edge), size=(h, w), mode="bilinear", align_corners=False).squeeze(0)
+                mask = F.upsample(masks_i[box_id, :, :].view(1, 1, roi_edge, roi_edge), size=(h, w),
+                                    mode="bilinear", align_corners=False).squeeze(0)
                 x_min = max(ref_box[1], 0)
                 x_max = min(ref_box[3] + 1, img_size[1].to(ref_box.device))
                 y_min = max(ref_box[0], 0)
                 y_max = min(ref_box[2] + 1, img_size[0].to(ref_box.device))
 
-                po_logits_mask_i[box_id, y_min:y_max, x_min:x_max] = mask[0, (y_min - ref_box[0]):(y_max - ref_box[0]), (x_min - ref_box[1]):(x_max - ref_box[1])]
-                # po_logits_mask_i[box_id, y_min:y_max, x_min:x_max] = 0.0
-                # tmp_val = mask[0, (y_min - ref_box[0]):(y_max - ref_box[0]), (x_min - ref_box[1]):(x_max - ref_box[1])]
-                # po_logits_mask_i[box_id, y_min, x_min] = 0
+                po_logits_mask_i[box_id, y_min:y_max, x_min:x_max] = \
+                    mask[0, (y_min - ref_box[0]):(y_max - ref_box[0]), (x_min - ref_box[1]):(x_max - ref_box[1])]
 
             po_logits_mask.append(po_logits_mask_i)
 
@@ -132,7 +125,7 @@ def po_assign_class_label(po_pred:torch.Tensor, sem_logits:torch.Tensor, cls:tor
 
     return po_2ch
 
-@torch.jit.script
+# @torch.jit.script
 def po_generate_seamless_output(po_2ch:torch.Tensor, po_num_stuff:int=6):
     po_cls = []
     po_pred_seamless = []
@@ -169,60 +162,50 @@ def po_generate_seamless_output(po_2ch:torch.Tensor, po_num_stuff:int=6):
 
     return po_pred_seamless, po_cls, po_iscrowd
 
-@torch.jit.script
-def po_inference(sem_logits:torch.Tensor, roi_msk_logits:torch.Tensor, bbx:torch.Tensor, cls:torch.Tensor, img_size:torch.Tensor):
-    # During inference, cls has instance classes starting from 0, i.e, from [0, num_thing)
-    # Get the roi mask containing the GT
-    msk_logits = []
-    for roi_msk_logits_i, cls_i in zip(roi_msk_logits, cls):
-        if roi_msk_logits_i is None:
-            msk_logits.append(None)
-        elif is_empty_tensor(roi_msk_logits_i):
-            msk_logits.append(torch.empty([0, 4, 28, 28], dtype=torch.float))
-        else:
-            msk_logits_i = torch.cat([roi_msk_logits_i[idx, cls_i[idx], :, :].unsqueeze(0) for idx in range(roi_msk_logits_i.shape[0])], dim=0)
-            msk_logits.append(msk_logits_i)
+class Pofusion_ONNX(torch.nn.Module):
+    def __init__(self):
+        super(Pofusion_ONNX, self).__init__()
 
-    msk_logits = torch.stack(msk_logits, dim=0)
-    po_logits_stuff, po_logits_inst = po_process_semantic_logits(sem_logits, bbx, cls)
-    po_logits_mask = po_process_mask_logits(sem_logits, msk_logits, bbx, cls, img_size)
+    # @torch.jit.script
+    def forward(self, sem_logits:torch.Tensor, roi_msk_logits:torch.Tensor, bbx:torch.Tensor, cls:torch.Tensor, img_size:torch.Tensor):
+        # During inference, cls has instance classes starting from 0, i.e, from [0, num_thing)
+        # Get the roi mask containing the GT
+        msk_logits = []
+        for roi_msk_logits_i, cls_i in zip(roi_msk_logits, cls):
+            if roi_msk_logits_i is None:
+                msk_logits.append(None)
+            else:
+                msk_logits_i = torch.cat([roi_msk_logits_i[idx, cls_i[idx], :, :].unsqueeze(0) for idx in range(roi_msk_logits_i.shape[0])], dim=0)
+                msk_logits.append(msk_logits_i)
 
-    po_pred = []
-    # po_logits = []
-    for stuff_i, inst_i, mask_i in zip(po_logits_stuff, po_logits_inst, po_logits_mask):
-        if (inst_i is None) or (mask_i is None):
-            po_logits_i = stuff_i
-        elif is_empty_tensor(inst_i) or is_empty_tensor(mask_i):
-            po_logits_i = stuff_i
-        else:
-            combined_inst_i = (inst_i.sigmoid() + mask_i.sigmoid()) * (inst_i + mask_i)
-            po_logits_i = torch.cat([stuff_i, combined_inst_i], dim=0)
-        # po_logits.append(po_logits_i)
-        po_pred_i = torch.max(torch.softmax(po_logits_i, dim=0), dim=0)[1]
-        po_pred.append(po_pred_i)
+        msk_logits = torch.stack(msk_logits, dim=0)
+        po_logits_stuff, po_logits_inst = po_process_semantic_logits(sem_logits, bbx, cls)
+        po_logits_mask = po_process_mask_logits(sem_logits, msk_logits, bbx, cls, img_size)
 
-    po_pred = torch.stack(po_pred, dim=0)
-    # Get the panoptic instance labels for every pixel.
-    # There could be some discrepancy between the class predicted by semantic seg and instance seg
-    po_2ch = po_assign_class_label(po_pred, sem_logits, cls)
-    po_2ch = torch.stack(po_2ch, dim=0)
-    po_pred_seamless, po_cls, po_iscrowd = po_generate_seamless_output(po_2ch)
+        po_pred = []
+        # po_logits = []
+        for stuff_i, inst_i, mask_i in zip(po_logits_stuff, po_logits_inst, po_logits_mask):
+            if (inst_i is None) or (mask_i is None):
+                po_logits_i = stuff_i
+            else:
+                combined_inst_i = (inst_i.sigmoid() + mask_i.sigmoid()) * (inst_i + mask_i)
+                po_logits_i = torch.cat([stuff_i, combined_inst_i], dim=0)
+            # po_logits.append(po_logits_i)
+            po_pred_i = torch.max(torch.softmax(po_logits_i, dim=0), dim=0)[1]
+            po_pred.append(po_pred_i)
 
-    # po_pred_seamless = PackedSequence(po_pred_seamless)
-    # po_cls = PackedSequence(po_cls)
-    # po_iscrowd = PackedSequence(po_iscrowd)
-    po_pred_seamless = torch.cat(po_pred_seamless, dim=0)
-    po_cls = torch.cat(po_cls, dim=0)
-    po_iscrowd = torch.cat(po_iscrowd, dim=0)
+        po_pred = torch.stack(po_pred, dim=0)
+        # Get the panoptic instance labels for every pixel.
+        # There could be some discrepancy between the class predicted by semantic seg and instance seg
+        po_2ch = po_assign_class_label(po_pred, sem_logits, cls)
+        po_2ch = torch.stack(po_2ch, dim=0)
+        po_pred_seamless, po_cls, po_iscrowd = po_generate_seamless_output(po_2ch)
 
-    return [po_pred_seamless, po_cls, po_iscrowd]
+        # po_pred_seamless = PackedSequence(po_pred_seamless)
+        # po_cls = PackedSequence(po_cls)
+        # po_iscrowd = PackedSequence(po_iscrowd)
+        po_pred_seamless = torch.cat(po_pred_seamless, dim=0)
+        po_cls = torch.cat(po_cls, dim=0)
+        po_iscrowd = torch.cat(po_iscrowd, dim=0)
 
-if __name__ == "__main__":
-    po_fusion_onnx_path = "./po_fusion.onnx"
-    sem_logits = torch.rand([1, 10, 896, 1536], dtype=torch.float)
-    roi_msk_logits = torch.rand([1, 4, 4, 28, 28], dtype=torch.float)
-    bbx_pred = torch.rand([1, 4, 4], dtype=torch.float)
-    # cls_pred = torch.randint(low=0, high=1, size=(1, 4), dtype=torch.uint8)
-    cls_pred = torch.tensor([[2, 1, 1, 1]], dtype=torch.int)
-    img_size_t = torch.tensor([896, 1536])
-    torch.onnx.export(po_inference, (sem_logits, roi_msk_logits, bbx_pred, cls_pred, img_size_t), po_fusion_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
+        return [po_pred_seamless, po_cls, po_iscrowd]

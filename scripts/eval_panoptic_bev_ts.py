@@ -303,7 +303,7 @@ def make_model(args, config, num_thing, num_stuff):
     #                               roi_config.getint("fpn_levels"), lbl_roi_size, roi_config.getboolean("void_is_background"), args.debug)
 
     roi_head = FPNMaskHead(transformer_config.getint("bev_ms_channels"), classes, roi_size, norm_act=norm_act_dynamic)
-    roi_algo = InstanceSegAlgoFPN_JIT( bbx_loss, msk_loss, roi_config.getstruct("bbx_reg_weights"), 
+    roi_algo = InstanceSegAlgoFPN_JIT(bbx_loss, msk_loss, roi_config.getstruct("bbx_reg_weights"), 
                                     roi_config.getint("fpn_canonical_scale"), roi_config.getint("fpn_canonical_level"), roi_size, 
                                     roi_config.getint("fpn_min_level"), roi_config.getint("fpn_levels"),
                                     roi_config.getfloat("nms_threshold"), roi_config.getfloat("score_threshold"), roi_config.getint("max_predictions"))
@@ -330,13 +330,17 @@ def make_model(args, config, num_thing, num_stuff):
     po_loss = None
     po_fusion_algo = PanopticFusionAlgo(po_loss, classes["stuff"], classes["thing"], 1)
 
+    # po_fusion_ts = PO_FUSION_TS()
+    # po_fusion_jit = torch.jit.script(po_fusion_ts)
+    # torch.jit.save(po_fusion_jit, "../jit/po_fusion_2.pt")
+
     panoptic_bev_jit = PanopticBevNetJIT(out_shape=out_shape, tfm_scales=tfm_scales)
     # model_jit = torch.jit.script(panoptic_bev_jit)
     # frozen_model = torch.jit.freeze(model_jit)
     # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_2.pt")
 
     # Create the BEV network
-    return panoptic_bev_jit
+    # return panoptic_bev_jit
     return PanopticBevNetTs(body, bev_transformer, rpn_head, roi_head, sem_head, transformer_algo, rpn_algo, roi_algo,
                           sem_algo, po_fusion_algo, args.test_dataset, classes=classes,
                           front_vertical_classes=transformer_config.getstruct("front_vertical_classes"),
@@ -415,6 +419,19 @@ def log_iter(mode, meters, time_meters, results, metrics, batch=True, **kwargs):
 
     plogging.iteration(kwargs["summary"], mode, kwargs["global_step"], kwargs["epoch"] + 1, kwargs["num_epochs"],
                       kwargs['curr_iter'], kwargs['num_iters'], OrderedDict(log_entries))
+
+def make_result_dict(results_list):
+    results_dict = OrderedDict()
+    results_dict['bbx_pred'] = results_list[0]
+    results_dict['cls_pred'] = results_list[1]
+    results_dict['obj_pred'] = results_list[2]
+    results_dict["sem_pred"] = results_list[3]
+    logger.info("panoptic_bev output, bbx_pred: {}, cls_pred: {}, obj_pred: {}, sem_pred: {}".format(results_dict['bbx_pred'].shape, results_dict['cls_pred'].shape, results_dict['obj_pred'].shape, results_dict["sem_pred"].shape))
+    results_dict['po_pred'] = results_list[4]
+    results_dict['po_class'] = results_list[5]
+    results_dict['po_iscrowd'] = results_list[6]
+    logger.info("panoptic_bev output, po_pred: {}, po_class: {}, po_iscrowd: {}".format(results_dict['po_pred'].shape, results_dict['po_class'], results_dict['po_iscrowd']))
+    return results_dict
 
 def test_jit_model():
     jit_path = "../jit/panoptic_bev_gpu_768.pt"
@@ -541,6 +558,7 @@ def test(model, dataloader, **varargs):
             # results = model(**sample)
             logger.debug("inputs img: {}, calib: {}, extrinsics: {}, valid_msk: {}".format(sample["img"].shape, sample["calib"].shape, sample["extrinsics"].shape, sample["valid_msk"].shape))
             inputs = (sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+            # imgs = torch.rand(size=(1,6,3,1024,1920), dtype=torch.float, device=sample["img"].device)
             if g_run_model_jit:
                 results = model_jit(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
             else:
@@ -549,9 +567,9 @@ def test(model, dataloader, **varargs):
 
             # model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=False)
             # frozen_model = torch.jit.optimize_for_inference(model_ts)
-            # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_768.pt")
-            # logger.info("torchscript model saved to ../jit/panoptic_bev_gpu_768.pt")
-            # break
+            # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_list_768.pt")
+            # logger.info("torchscript model saved to ../jit/panoptic_bev_gpu_list_768.pt")
+            # return
 
             ### save panoptic_bev_cpu.pt due to Perspective2OrthographicWarper.forward()
             # device=torch.device('cpu')
@@ -567,6 +585,7 @@ def test(model, dataloader, **varargs):
             if not varargs['debug']:
                 distributed.barrier()
 
+            results = make_result_dict(results)
             g_bev_visualizer.plot_bev(sample, it, results, show_po=True)
             # break
             # for idx, (path, submodule) in enumerate(model.named_modules()):
@@ -765,5 +784,5 @@ def main(args):
                      debug=args.debug)
 
 if __name__ == "__main__":
-    main_jit(parser.parse_args())
+    main(parser.parse_args())
     # test_jit_model()

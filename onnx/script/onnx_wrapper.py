@@ -10,15 +10,12 @@ import onnx
 import onnxruntime as ort
 import onnxsim
 from panoptic_bev.utils import plogging
-# plogging.init("./", "onnx_wrapper")
+plogging.init("./", "onnx_wrapper")
 logger = plogging.get_logger()
 
 class OnnxWrapper(object):
     def __init__(self):
         self.print_version()
-
-    def __init__(self, model_path):
-        self.ortss = self.load_onnx_model(model_path)
 
     def print_version(self):
         # print("torch: {}".format(torch.__version__))
@@ -130,7 +127,19 @@ class OnnxWrapper(object):
         self.benchmark(ortss, ms_bev, nwarmup=100, nruns=100)
         # result = self.run_onnx_model(ortss, [image])
         # logger.info(result)
-        return True        
+        return True
+
+    def test_po_fusion(self, model_path):
+        model = onnx.load(model_path)
+        try:
+            onnx.checker.check_model(model)
+            # logger.info(onnx.helper.printable_graph(model.graph))
+            logger.info(model.graph)
+        except Exception as e:
+            logger.error("onnx check model error: {}".format(e))
+            return False
+
+        self.load_onnx_model(model_path)
 
     def test_resnet50(self, model_path):
         model = onnx.load(model_path)
@@ -157,8 +166,9 @@ if __name__ == "__main__":
     encoder_sim_path = "../body_encoder_op13_sim.onnx"
     transformer_jit_path = "../../jit/ms_transformer.pt"
     sem_algo_onnx_path = "../sem_algo_op13.onnx"
-    onwp = OnnxWrapper(sem_algo_onnx_path)
-    onwp.test_sem_algo(sem_algo_onnx_path)
+    po_fusion_onnx_path = "../po_fusion_op13.onnx"
+    onwp = OnnxWrapper()
+    onwp.test_po_fusion(po_fusion_onnx_path)
     # onwp.simplify_onnx_model(sem_algo_onnx_path)
     # onwp.test_torch()
     # onwp.simplify_onnx_model(encoder_path)

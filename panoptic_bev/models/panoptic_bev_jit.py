@@ -3,6 +3,7 @@ import torch, sys, time
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from panoptic_bev.algos.po_fusion_ts import po_inference
+from panoptic_bev.algos.po_fusion_onnx import Pofusion_ONNX
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 sys.path.append("/home/hugoliu/github/PanopticBEV/onnx/script")
@@ -43,11 +44,14 @@ class PanopticBevNetJIT(nn.Module):
         logger.debug("load sem_algo: {}".format(self.sem_algo_jit_path))
 
         self.sem_algo_onnx_path = "../onnx/sem_algo_op13.onnx"
-        self.sem_algo_onnx = OnnxWrapper(self.sem_algo_onnx_path)
+        self.sem_algo_onnx = OnnxWrapper()
+        self.sem_algo_onnx.load_onnx_model(self.sem_algo_onnx_path)
 
         self.po_fusion_jit_path = "../jit/po_fusion.pt"
         self.po_fusion_jit = torch.jit.load(self.po_fusion_jit_path)
         logger.debug("load po_fusion: {}".format(self.po_fusion_jit_path))
+
+        self.po_fusion_onnx_path = "../onnx/po_fusion_op13.onnx"
 
         # Params
         self.out_shape=out_shape
@@ -147,8 +151,8 @@ class PanopticBevNetJIT(nn.Module):
         start_time = time.time()
         logger.debug("sem-in, {}".format(start_time))
         for i in range(LOOP):
-            # sem_pred, sem_logits = self.sem_algo_jit(ms_bev)
-            sem_pred, sem_logits = self.sem_algo_onnx.run(ms_bev)
+            sem_pred, sem_logits = self.sem_algo_jit(ms_bev)
+            # sem_pred, sem_logits = self.sem_algo_onnx.run(ms_bev)
         end_time = time.time()
         logger.debug("sem-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
 
@@ -167,6 +171,9 @@ class PanopticBevNetJIT(nn.Module):
             po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
         end_time = time.time()
         logger.debug("fusion-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
+
+        # torch.onnx.export(self.po_fusion_jit, (sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t), self.po_fusion_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
+        # sys.exit(0)
 
         # Prepare outputs
         # PREDICTIONS
