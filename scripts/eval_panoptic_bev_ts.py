@@ -485,13 +485,11 @@ def test(model, dataloader, **varargs):
     if g_run_model_jit:
         model_jit = torch.jit.load("../jit/panoptic_bev_gpu.pt")
     else:
+        fuser = FuseConvBn()
+        fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
+        fuser.do_bn_fusion_v2(model, bn_name="InPlaceABNSync")
+        # logger.info("final model after fusion: {}".format(model))
         model.eval()
-
-    fuser = FuseConvBn()
-    # fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
-    # fuser.do_bn_fusion_v2(model, bn_name="InPlaceABNSync")
-    # logger.info("final model after fusion: {}".format(model))
-
 
     num_stuff = dataloader.dataset.num_stuff
     num_thing = dataloader.dataset.num_thing
