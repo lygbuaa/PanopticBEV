@@ -10,7 +10,7 @@ import onnx
 import onnxruntime as ort
 import onnxsim
 from panoptic_bev.utils import plogging
-plogging.init("./", "onnx_wrapper")
+# plogging.init("./", "onnx_wrapper")
 logger = plogging.get_logger()
 
 class OnnxWrapper(object):
@@ -42,9 +42,9 @@ class OnnxWrapper(object):
 
     def load_onnx_model(self, model_path):
         provider = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        ortss = ort.InferenceSession(model_path, providers=provider)
-        logger.info("load model {} onto {}".format(model_path, ortss.get_providers()))
-        return ortss
+        self.ortss = ort.InferenceSession(model_path, providers=provider)
+        logger.info("load model {} onto {}".format(model_path, self.ortss.get_providers()))
+        return self.ortss
 
     #ortss: onnxruntime loaded model, inputs: [input0, input1]
     def run_onnx_model(self, ortss, inputs):

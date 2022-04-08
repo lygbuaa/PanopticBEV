@@ -20,6 +20,8 @@ g_toggle_rpn_jit = False
 g_toggle_roi_jit = False
 g_toggle_semantic_jit = False
 g_toggle_po_jit = False
+
+g_toggle_rpn_onnx = False
 g_toggle_po_onnx = False
 
 class PanopticBevNetTs(nn.Module):
@@ -50,7 +52,6 @@ class PanopticBevNetTs(nn.Module):
         if g_toggle_body_jit:
             self.body_jit = torch.jit.load(self.body_jit_path)
             logger.debug("load encoder: {}".format(self.body_jit_path))
-
         self.body_onnx_path = "../onnx/body_encoder_op13.onnx"
 
         # Transformer
@@ -59,7 +60,6 @@ class PanopticBevNetTs(nn.Module):
         if g_toggle_transformer_jit:
             self.transformer_jit = torch.jit.load(self.transformer_jit_path)
             logger.debug("load transformer: {}".format(self.transformer_jit_path))
-        
         self.transformer_onnx_path = "../onnx/transformer_op13.onnx"
 
         # Modules
@@ -79,6 +79,10 @@ class PanopticBevNetTs(nn.Module):
         if g_toggle_rpn_jit:
             self.rpn_algo_jit = torch.jit.load(self.rpn_algo_jit_path)
             logger.debug("load rpn_algo: {}".format(self.rpn_algo_jit_path))
+        self.rpn_algo_onnx_path = "../onnx/rpn_algo_op13.onnx"
+        if g_toggle_rpn_onnx:
+            self.rpn_algo_onnx = OnnxWrapper()
+            self.rpn_algo_onnx.load_onnx_model(self.rpn_algo_onnx_path)
 
         self.roi_algo_jit_path = "../jit/roi_algo.pt"
         if g_toggle_roi_jit:
@@ -195,17 +199,18 @@ class PanopticBevNetTs(nn.Module):
 
         # RPN Part
         if g_toggle_rpn_jit:
-            proposals = self.rpn_algo_jit(ms_bev, self.valid_size)
+            proposals = self.rpn_algo_jit(ms_bev)
+        elif g_toggle_rpn_onnx:
+            proposals = self.rpn_algo_onnx.run(ms_bev)
         else:
             # self.rpn_algo.set_head(self.rpn_head)
-            proposals = self.rpn_algo(ms_bev, self.valid_size)
+            proposals = self.rpn_algo(ms_bev)
         # rpn_algo_ts = torch.jit.trace(self.rpn_algo, (ms_bev, self.valid_size), check_trace=True)
         # torch.jit.save(rpn_algo_ts, self.rpn_algo_jit_path)
         # sys.exit(0)
 
-        # if len(proposals) < 1:
-        #     proposals.append(None)
-        # proposals = PackedSequence(proposals)
+        # torch.onnx.export(self.rpn_algo, (ms_bev), self.rpn_algo_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
+        # sys.exit(0)
 
         # ROI Part
         if g_toggle_roi_jit:

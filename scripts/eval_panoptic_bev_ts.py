@@ -256,6 +256,9 @@ def make_model(args, config, num_thing, num_stuff):
     region_supervision_loss = None
     transformer_algo = None
 
+    W_out = int(dl_config.getstruct("bev_crop")[0] * dl_config.getfloat("scale"))
+    Z_out = int(dl_config.getstruct("bev_crop")[1] * dl_config.getfloat("scale"))
+
     # Create RPN
     # proposal_generator = ProposalGenerator(rpn_config.getfloat("nms_threshold"),
     #                                        rpn_config.getint("num_pre_nms_train"),
@@ -273,11 +276,12 @@ def make_model(args, config, num_thing, num_stuff):
     rpn_head = RPNHead(transformer_config.getint("bev_ms_channels"), int(len(anchor_scales) * len(anchor_ratios)), 1,
                        rpn_config.getint("hidden_channels"), norm_act_dynamic)
 
+    rpn_valid_size = [torch.tensor([W_out, Z_out*2])]
     rpn_algo = RPNAlgoFPN_JIT(rpn_head, rpn_config.getfloat("nms_threshold"), rpn_config.getint("num_pre_nms_val"),
                                 rpn_config.getint("num_post_nms_val"), rpn_config.getint("min_size"),
                                 anchor_scales, anchor_ratios,
                                 fpn_config.getstruct("out_strides"), rpn_config.getint("fpn_min_level"),
-                                rpn_config.getint("fpn_levels"))
+                                rpn_config.getint("fpn_levels"), rpn_valid_size)
 
     # Create instance segmentation network
     # bbx_prediction_generator = BbxPredictionGenerator(roi_config.getfloat("nms_threshold"),
@@ -312,8 +316,6 @@ def make_model(args, config, num_thing, num_stuff):
     # torch.jit.save(roi_algo, "../jit/roi_algo.pt")
 
     # Create semantic segmentation network
-    W_out = int(dl_config.getstruct("bev_crop")[0] * dl_config.getfloat("scale"))
-    Z_out = int(dl_config.getstruct("bev_crop")[1] * dl_config.getfloat("scale"))
     out_shape = (W_out, Z_out)
     sem_loss = None
     sem_img_size = torch.tensor([W_out, Z_out*2])

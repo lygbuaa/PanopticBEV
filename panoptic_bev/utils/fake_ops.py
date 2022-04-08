@@ -2,7 +2,15 @@
 # -*- coding:utf-8 -*-
 
 import numpy as np
-import torch
+import torch, torchvision
+
+def torchvision_nms(bbx:torch.Tensor, scores:torch.Tensor, threshold:float, n_max:int):
+    idx = torchvision.ops.nms(bbx, scores, threshold)
+    return idx
+
+def fake_po_nms(bbx:torch.Tensor, scores:torch.Tensor, threshold:float, n_max:int):
+    idx = torch.rand(300, dtype=torch.float, device=bbx.device)*n_max
+    return idx.type(torch.long)
 
 def fake_warp_perspective(src: torch.Tensor, M: torch.Tensor, dsize: torch.Tensor):
     N, C, _, _ = src.shape

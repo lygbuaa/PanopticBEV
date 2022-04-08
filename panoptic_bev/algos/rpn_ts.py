@@ -4,6 +4,7 @@ from panoptic_bev.utils.nms import nms
 from panoptic_bev.utils.bbx import shift_boxes
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
+from panoptic_bev.utils.fake_ops import torchvision_nms
 
 @torch.jit.script
 def g_proposal_generator(boxes:torch.Tensor, scores:torch.Tensor, nms_threshold:float=0.7, num_pre_nms:int=6000, num_post_nms:int=300, min_size:int=0):
@@ -32,8 +33,9 @@ def g_proposal_generator(boxes:torch.Tensor, scores:torch.Tensor, nms_threshold:
 
         # NMS
         # idx = nms(bbx_i, obj_i, self.nms_threshold, num_post_nms)
-        idx = torch.ops.po_cpp_ops.po_nms(bbx_i, obj_i, nms_threshold, num_post_nms)
-        # logger.debug("ProposalGenerator bbx_i: {}, obj_i: {}, idx: {}, proposals len: {}".format(bbx_i.shape, obj_i.shape, idx.shape, len(proposals)))
+        # idx = torch.ops.po_cpp_ops.po_nms(bbx_i, obj_i, nms_threshold, num_post_nms)
+        idx = torchvision_nms(bbx_i, obj_i, nms_threshold, num_post_nms)
+        # print("ProposalGenerator bbx_i: {}, obj_i: {}, idx: {}, proposals len: {}".format(bbx_i.shape, obj_i.shape, idx.shape, len(proposals)))
 
         # if idx.numel() == 0:
         #     return [None]
@@ -71,7 +73,8 @@ class RPNAlgoFPN_JIT(torch.nn.Module):
                  anchor_ratios,
                  anchor_strides,
                  min_level,
-                 levels):
+                 levels,
+                 valid_size):
         # super(RPNAlgoFPN_JIT, self).__init__(anchor_scale, anchor_ratios)
         super(RPNAlgoFPN_JIT, self).__init__()
         self.head = head
@@ -86,6 +89,7 @@ class RPNAlgoFPN_JIT(torch.nn.Module):
         # Cache per-cell anchors
         self.anchor_strides = anchor_strides[min_level:min_level + levels]
         self.anchors = [self._base_anchors(stride) for stride in self.anchor_strides]
+        self.valid_size = valid_size
 
     def set_head(self, head):
         self.head = head
@@ -151,7 +155,7 @@ class RPNAlgoFPN_JIT(torch.nn.Module):
 
         return g_proposal_generator(boxes, obj_logits, self.nms_threshold, self.num_pre_nms, self.num_post_nms, self.min_size)
 
-    def forward(self, x, valid_size):
+    def forward(self, x):
         # Calculate logits for the levels that we need
         x = x[self.min_level:self.min_level + self.levels]
         obj_logits, bbx_logits, h, w = self._get_logits(x)
@@ -164,4 +168,4 @@ class RPNAlgoFPN_JIT(torch.nn.Module):
             anchors.append(self._shifted_anchors(anchors_i, stride_i, h_i, w_i, bbx_logits.dtype, bbx_logits.device))
         anchors = torch.cat(anchors, dim=0)
 
-        return self._inference(obj_logits, bbx_logits, anchors, valid_size)
+        return self._inference(obj_logits, bbx_logits, anchors, self.valid_size)
