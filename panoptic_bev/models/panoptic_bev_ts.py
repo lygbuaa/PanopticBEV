@@ -22,6 +22,7 @@ g_toggle_semantic_jit = False
 g_toggle_po_jit = False
 
 g_toggle_rpn_onnx = False
+g_toggle_roi_onnx = False
 g_toggle_po_onnx = False
 
 class PanopticBevNetTs(nn.Module):
@@ -88,6 +89,10 @@ class PanopticBevNetTs(nn.Module):
         if g_toggle_roi_jit:
             self.roi_algo_jit = torch.jit.load(self.roi_algo_jit_path)
             logger.debug("load roi_algo: {}".format(self.roi_algo_jit_path))
+        self.roi_algo_onnx_path = "../onnx/roi_algo_op13.onnx"
+        if g_toggle_roi_onnx:
+            self.roi_algo_onnx = OnnxWrapper()
+            self.roi_algo_onnx.load_onnx_model(self.roi_algo_onnx_path)
 
         self.sem_algo_jit_path = "../jit/sem_algo.pt"
         if g_toggle_semantic_jit:
@@ -214,12 +219,32 @@ class PanopticBevNetTs(nn.Module):
 
         # ROI Part
         if g_toggle_roi_jit:
-            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.roi_algo_jit(ms_bev, proposals, self.valid_size, self.img_size_t)
+            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.roi_algo_jit(ms_bev, proposals)
+        elif g_toggle_roi_onnx:
+            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.roi_algo_onnx.run([ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals])
         else:
-            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo(ms_bev, proposals, self.valid_size, self.img_size_t)
-        # inst_algo_ts = torch.jit.trace(self.inst_algo, (ms_bev, proposals, self.valid_size_t, self.img_size_t), check_trace=True)
-        # torch.jit.save(inst_algo_ts, self.roi_algo_jit_path)
-        # sys.exit(0)
+            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals)
+
+        roi_algo_jit = torch.jit.script(self.inst_algo)
+        torch.onnx.export(
+            model=roi_algo_jit, 
+            args=(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals),
+            f=self.roi_algo_onnx_path,
+            input_names=["ms_bev_0", "ms_bev_1", "ms_bev_2", "ms_bev_3", "proposals"],
+            output_names=["bbx_pred", "cls_pred", "obj_pred", "roi_msk_logits"],
+            dynamic_axes={
+                    "ms_bev_0": [0],
+                    "ms_bev_1": [0],
+                    "ms_bev_2": [0],
+                    "ms_bev_3": [0],
+                    "proposals": [0, 1],
+                    "bbx_pred": [1],
+                    "cls_pred": [1],
+                    "obj_pred": [1], 
+                    "roi_msk_logits": [1],
+                  },
+            opset_version=13, verbose=True, do_constant_folding=True)
+        sys.exit(0)
 
         # Segmentation Part
         if g_toggle_semantic_jit:
@@ -239,9 +264,9 @@ class PanopticBevNetTs(nn.Module):
         # The second channel contains the instance masks with the instance label being the corresponding semantic label
         # po_pred, _, _ = self.po_fusion_algo.inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size)
 
-        bbx_pred = torch.stack(bbx_pred, dim=0)
-        cls_pred = torch.stack(cls_pred, dim=0)
-        roi_msk_logits = torch.stack(roi_msk_logits, dim=0)
+        # bbx_pred = torch.stack(bbx_pred, dim=0)
+        # cls_pred = torch.stack(cls_pred, dim=0)
+        # roi_msk_logits = torch.stack(roi_msk_logits, dim=0)
         logger.debug("po_fusion input: sem_logits: {}, roi_msk_logits: {}, bbx_pred: {}, cls_pred: {}".format(sem_logits.shape, roi_msk_logits.shape, bbx_pred, cls_pred))
         
         if g_toggle_po_jit:

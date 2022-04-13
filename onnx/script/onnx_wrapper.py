@@ -10,7 +10,7 @@ import onnx
 import onnxruntime as ort
 import onnxsim
 from panoptic_bev.utils import plogging
-# plogging.init("./", "onnx_wrapper")
+plogging.init("./", "onnx_wrapper")
 logger = plogging.get_logger()
 
 class OnnxWrapper(object):
@@ -69,6 +69,7 @@ class OnnxWrapper(object):
 
     def simplify_onnx_model(self, model_path):
         model = onnx.load(model_path)
+
         logger.debug("simplify onnx model: {}".format(model_path))
         # logger.info('onnx model graph is:\n{}'.format(model.graph))
         model_sim, check = onnxsim.simplify(model)
@@ -129,6 +130,45 @@ class OnnxWrapper(object):
         # logger.info(result)
         return True
 
+    def test_rpn_algo(self, model_path):
+        model = onnx.load(model_path)
+        try:
+            onnx.checker.check_model(model)
+            # logger.info(onnx.helper.printable_graph(model.graph))
+        except Exception as e:
+            logger.error("onnx check model error: {}".format(e))
+            return False
+
+        ortss = self.load_onnx_model(model_path)
+        ms_bev_0 = np.random.rand(1, 256, 224, 384).astype(np.float32)
+        ms_bev_1 = np.random.rand(1, 256, 112, 192).astype(np.float32)
+        ms_bev_2 = np.random.rand(1, 256, 56, 96).astype(np.float32)
+        ms_bev_3 = np.random.rand(1, 256, 28, 48).astype(np.float32)
+        ms_bev=[ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3]
+        self.benchmark(ortss, ms_bev, nwarmup=100, nruns=100)
+        # result = self.run_onnx_model(ortss, [image])
+        # logger.info(result)
+        return True        
+
+    def test_roi_algo(self, model_path):
+        model = onnx.load(model_path)
+        try:
+            onnx.checker.check_model(model)
+            # logger.info(onnx.helper.printable_graph(model.graph))
+            # logger.info('onnx model graph is:\n{}'.format(model.graph))
+        except Exception as e:
+            logger.error("onnx check model error: {}".format(e))
+            return False
+
+        ortss = self.load_onnx_model(model_path)
+        ms_bev_0 = np.random.rand(1, 256, 224, 384).astype(np.float32)
+        ms_bev_1 = np.random.rand(1, 256, 112, 192).astype(np.float32)
+        ms_bev_2 = np.random.rand(1, 256, 56, 96).astype(np.float32)
+        ms_bev_3 = np.random.rand(1, 256, 28, 48).astype(np.float32)
+        proposals = np.random.rand(1, 74, 4).astype(np.float32)
+        self.benchmark(ortss, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3, proposals], nwarmup=100, nruns=100)
+        return True
+
     def test_po_fusion(self, model_path):
         model = onnx.load(model_path)
         try:
@@ -166,9 +206,14 @@ if __name__ == "__main__":
     encoder_sim_path = "../body_encoder_op13_sim.onnx"
     transformer_jit_path = "../../jit/ms_transformer.pt"
     sem_algo_onnx_path = "../sem_algo_op13.onnx"
+    rpn_algo_onnx_path = "../rpn_algo_op13.onnx"
     po_fusion_onnx_path = "../po_fusion_op13.onnx"
+    roi_algo_onnx_path = "../roi_algo_op13.onnx"
     onwp = OnnxWrapper()
-    onwp.test_po_fusion(po_fusion_onnx_path)
+    # onwp.simplify_onnx_model(roi_algo_onnx_path)
+    onwp.test_roi_algo(roi_algo_onnx_path)
+    # onwp.test_rpn_algo(rpn_algo_onnx_path)
+    # onwp.test_po_fusion(po_fusion_onnx_path)
     # onwp.simplify_onnx_model(sem_algo_onnx_path)
     # onwp.test_torch()
     # onwp.simplify_onnx_model(encoder_path)

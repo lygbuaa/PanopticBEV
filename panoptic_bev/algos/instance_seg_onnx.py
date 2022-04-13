@@ -9,7 +9,7 @@ from panoptic_bev.utils.parallel import PackedSequence
 from panoptic_bev.utils.roi_sampling import roi_sampling
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
-from panoptic_bev.utils.fake_ops import torchvision_nms, fake_po_roi
+from panoptic_bev.utils.fake_ops import torchvision_nms, fake_po_roi, fake_head_roi_bbx, fake_head_roi_msk
 
 
 @torch.jit.script
@@ -63,7 +63,6 @@ def g_rois(
     # stride = proposals.new([fs / os for fs, os in zip(x.shape[-2:], img_size)])
     stride = torch.stack([fs / os for fs, os in zip(x.shape[-2:], img_size)], dim=0).to(x.device)
     proposals = (proposals - 0.5) * stride.repeat(2) + 0.5
-    # return roi_sampling(x, proposals, proposals_idx, roi_size)
     # rois, msk = torch.ops.po_cpp_ops.po_roi(x, proposals, proposals_idx, roi_size)
     rois = fake_po_roi(x, proposals, proposals_idx, roi_size)
     # print("g_rois--- x: {}, proposals: {}, proposals_idx: {}, roi_size: {}, rois: {}".format(x.shape, proposals.shape, proposals_idx.shape, roi_size, rois.shape))
@@ -74,7 +73,7 @@ def g_packed_sequence_contiguous(input_tensors:torch.Tensor) -> Tuple[torch.Tens
     packed_tensors = []
     packed_idx = []
     for i, tensor in enumerate(input_tensors):
-        if tensor is not None:
+        # if tensor is not None:
             packed_tensors.append(tensor)
             idx = tensor.new_full((tensor.size(0),), i, dtype=torch.long)
             packed_idx.append(idx)
@@ -85,14 +84,14 @@ def g_packed_sequence_contiguous(input_tensors:torch.Tensor) -> Tuple[torch.Tens
 @torch.jit.script
 def g_prediction_generator(
     boxes:torch.Tensor, scores:torch.Tensor, nms_threshold:float=0.3, score_threshold:float=0.1, max_predictions:int=100
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
-    bbx_pred = []
-    cls_pred = []
-    obj_pred = []
-    for bbx_i, obj_i in zip(boxes, scores):
-        if bbx_i is None or obj_i is None:
-            break
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    bbx_pred = torch.empty([0, 4], dtype=torch.float, device=boxes.device)
+    cls_pred = torch.empty([0], dtype = torch.long, device=boxes.device)
+    obj_pred = torch.empty([0], dtype = torch.float, device=boxes.device)
 
+    for bbx_i, obj_i in zip(boxes, scores):
+        # if bbx_i is None or obj_i is None:
+        #     break
         # Class independent NMS
         bbx_all = bbx_i.reshape(-1, 4)
         scores_all = obj_i[:, 1:].reshape(-1)
@@ -109,8 +108,8 @@ def g_prediction_generator(
 
         # Filter empty predictions
         idx = (bbx_all[:, 2] > bbx_all[:, 0]) & (bbx_all[:, 3] > bbx_all[:, 1])
-        if not idx.any().item():
-            continue
+        # if not idx.any().item():
+        #     continue
         bbx_all = bbx_all[idx]
         scores_all = scores_all[idx]
         cls_all = cls_all[idx]
@@ -119,8 +118,11 @@ def g_prediction_generator(
         # idx = nms(bbx_all.contiguous(), scores_all.contiguous(), threshold=self.nms_threshold, n_max=-1)
         # idx = torch.ops.po_cpp_ops.po_nms(bbx_all.contiguous(), scores_all.contiguous(), nms_threshold, -1)
         idx = torchvision_nms(bbx_all.contiguous(), scores_all.contiguous(), nms_threshold, -1)
-        if idx.numel() == 0:
-            continue
+
+        # ONNXRuntimeError: Mismatched tensor element type: source=1 target=7
+        # if idx.numel() == 0:
+            # continue
+
         bbx_all = bbx_all[idx]
         scores_all = scores_all[idx]
         cls_all = cls_all[idx]
@@ -140,13 +142,14 @@ def g_prediction_generator(
             obj_pred_i = obj_pred_i[idx]
 
         # Save results
-        bbx_pred.append(bbx_pred_i)
-        cls_pred.append(cls_pred_i)
-        obj_pred.append(obj_pred_i)
+        bbx_pred = torch.cat((bbx_pred, bbx_pred_i), dim=0)
+        cls_pred = torch.cat((cls_pred, cls_pred_i), dim=0)
+        obj_pred = torch.cat((obj_pred, obj_pred_i), dim=0)
 
-    return bbx_pred, cls_pred, obj_pred
+    # return bbx_pred, cls_pred, obj_pred
+    return torch.unsqueeze(bbx_pred, dim=0), torch.unsqueeze(cls_pred, dim=0), torch.unsqueeze(obj_pred, dim=0)
 
-class InstanceSegAlgoFPN_JIT(torch.nn.Module):
+class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
     """Instance segmentation algorithm for FPN networks
 
     Parameters
@@ -188,8 +191,9 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
                  levels,
                  nms_threshold,
                  score_threshold,
-                 max_predictions):
-        super(InstanceSegAlgoFPN_JIT, self).__init__()
+                 max_predictions,
+                 valid_size):
+        super(InstanceSegAlgoFPN_ONNX, self).__init__()
         # self.head = head
         self.bbx_loss = bbx_loss
         self.msk_loss = msk_loss
@@ -203,13 +207,15 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         self.nms_threshold = nms_threshold
         self.score_threshold = score_threshold
         self.max_predictions = max_predictions
+        self.valid_size = valid_size
         self.head_bbx = torch.jit.load("../jit/roi_head_bbx.pt")
         self.head_msk = torch.jit.load("../jit/roi_head_msk.pt")
-        # self.use_jit_head = True
 
     @staticmethod
     def _split_and_clip(boxes:torch.Tensor, scores:torch.Tensor, index:torch.Tensor, valid_size:List[torch.Tensor]):
-        boxes_out, scores_out = [], []
+        # boxes_out, scores_out = [], []
+        boxes_out = torch.empty([0, 4, 4], dtype=torch.float, device=boxes.device)
+        scores_out = torch.empty([0, 5], dtype=torch.float, device=boxes.device)
         for img_id, valid_size_i in enumerate(valid_size):
             idx = index == img_id
             if idx.any().item():
@@ -217,24 +223,17 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
                 boxes_i[:, :, [0, 2]] = torch.clamp(boxes_i[:, :, [0, 2]], min=0, max=valid_size_i[0])
                 boxes_i[:, :, [1, 3]] = torch.clamp(boxes_i[:, :, [1, 3]], min=0, max=valid_size_i[1])
 
-                boxes_out.append(boxes_i)
-                scores_out.append(scores[idx])
-            # else:
-            #     boxes.append(None)
-            #     scores.append(None)
+                # boxes_out.append(boxes_i)
+                # scores_out.append(scores[idx])
+                boxes_out = torch.cat((boxes_out, boxes_i), dim=0)
+                scores_out = torch.cat((scores_out, scores[idx]), dim=0)
 
-        # return torch.stack(boxes_out, dim=0), torch.stack(scores_out, dim=0)
-        return boxes_out, scores_out
+        return torch.unsqueeze(boxes_out, dim=0), torch.unsqueeze(scores_out, dim=0)
 
     def _target_level(self, boxes:torch.Tensor) -> torch.Tensor:
         scales = (boxes[:, 2:] - boxes[:, :2]).prod(dim=-1).sqrt()
         target_level = torch.floor(self.canonical_level + torch.log2(scales / self.canonical_scale + 1e-6))
         return target_level.clamp(min=self.min_level, max=self.min_level + self.levels - 1)
-
-    # def _rois(self, x, proposals, proposals_idx, img_size):
-    #     stride = proposals.new([fs / os for fs, os in zip(x.shape[-2:], img_size)])
-    #     proposals = (proposals - 0.5) * stride.repeat(2) + 0.5
-    #     return roi_sampling(x, proposals, proposals_idx, self.roi_size)
 
     def _head_bbx(self, x:List[torch.Tensor], proposals:torch.Tensor, proposals_idx:torch.Tensor, img_size:torch.Tensor):
         # Find target levels
@@ -245,7 +244,7 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         for level_i, x_i in enumerate(x):
             idx = target_level == (level_i + self.min_level)
             if idx.any().item():
-                # rois[idx] = self._rois(x_i, proposals[idx], proposals_idx[idx], img_size)
+                # ONNXRuntimeError: right operand cannot broadcast on dim 3 LeftShape: {256}, RightShape: {256,256,14,14}
                 rois[idx] = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
 
         # Run head
@@ -256,6 +255,12 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
             rois = torch.cat([rois, rois], dim=0)
 
         cls_logits, bbx_logits = self.head_bbx(rois)
+        # cls_logits, bbx_logits = fake_head_roi_bbx(rois)
+        # cls_logits, bbx_logits, _ = self.head(rois, True, False)
+        # head_bbx_jit = torch.jit.script(self.head)
+        # torch.jit.save(head_bbx_jit, "../jit/roi_head_bbx_ts.pt")
+        # sys.exit(0)
+
         if prune:
             cls_logits = cls_logits[0, ...].unsqueeze(0)
             bbx_logits = bbx_logits[0, ...].unsqueeze(0)
@@ -270,7 +275,6 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         for level_i, x_i in enumerate(x):
             idx = target_level == (level_i + self.min_level)
             if idx.any().item():
-                # rois[idx] = self._rois(x_i, proposals[idx], proposals_idx[idx], img_size)
                 rois[idx] = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
 
         # Run head
@@ -281,6 +285,8 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
             rois = torch.cat([rois, rois], dim=0)
 
         msk_logits = self.head_msk(rois)
+        # msk_logits = fake_head_roi_msk(rois)
+        # _, _, msk_logits = self.head(rois, False, True)
         if prune:
             msk_logits = msk_logits[0, ...].unsqueeze(0)
         return msk_logits
@@ -294,7 +300,8 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
         return bbx_gt_idxs
 
     def _make_batch_list(self, msk_gt_logits:torch.Tensor, bbx_gt_idx:torch.Tensor, batch_size:int):
-        msk_gt_list = []
+        # msk_gt_list = []
+        msk_gt_list = torch.empty([0, 4, 28, 28], dtype=torch.float, device=msk_gt_logits.device)
         unique_idxs = torch.unique(bbx_gt_idx)
         for entry in range(batch_size):
             if torch.sum(unique_idxs == entry) == 0:
@@ -302,80 +309,57 @@ class InstanceSegAlgoFPN_JIT(torch.nn.Module):
                 pass
             else:
                 mask = (bbx_gt_idx == entry)
-                if msk_gt_logits is not None:
-                    msk_gt_list.append(msk_gt_logits[mask, ...])
+                # if msk_gt_logits is not None:
+                # msk_gt_list.append(msk_gt_logits[mask, ...])
+                msk_gt_list = torch.cat((msk_gt_list, msk_gt_logits[mask, ...]), dim=0)
 
-        return msk_gt_list
+        return torch.unsqueeze(msk_gt_list, dim=0)
 
-    def return_empty(self):
-        bbx_empty = torch.empty([0, 4], dtype=torch.float)
-        cls_empty = torch.empty([0], dtype = torch.int)
-        obj_empty = torch.empty([0], dtype = torch.float)
-        roi_msk_empty = torch.empty([0, 4, 28, 28], dtype=torch.float)
-        return [bbx_empty], [cls_empty], [obj_empty], [roi_msk_empty]
+    def return_empty(self, feat:torch.Tensor):
+        bbx_empty = torch.empty([1, 0, 4], dtype=torch.float, device=feat.device)
+        cls_empty = torch.empty([1, 0], dtype = torch.long, device=feat.device)
+        obj_empty = torch.empty([1, 0], dtype = torch.float, device=feat.device)
+        roi_msk_empty = torch.empty([1, 0, 4, 28, 28], dtype=torch.float, device=feat.device)
+        # return [bbx_empty], [cls_empty], [obj_empty], [roi_msk_empty]
+        return bbx_empty, cls_empty, obj_empty, roi_msk_empty
 
-    def forward(self, x:List[torch.Tensor], proposals:List[torch.Tensor], valid_size:List[torch.Tensor], img_size:torch.Tensor):
-        x = x[self.min_level:self.min_level + self.levels]
+    # def forward(self, x:List[torch.Tensor], proposals:List[torch.Tensor]):
+    # when onnx.export a scripted module, param can't be List[torch.Tensor], I don't know why
+    def forward(self, x0:torch.Tensor, x1:torch.Tensor, x2:torch.Tensor, x3:torch.Tensor, proposals:torch.Tensor):
+        # x = x[self.min_level:self.min_level + self.levels]
+        x = [x0, x1, x2, x3]
         bbx_pred = []
         cls_pred = []
         obj_pred = []
         msk_logits = []
 
-        if len(proposals) < 1:
-            # return bbx_pred, cls_pred, obj_pred, msk_logits
-            return self.return_empty()
+        _, N, _ = proposals.shape
+        if N < 1:
+            return self.return_empty(feat=x[0])
 
-        # proposals_2 = torch.cat(proposals)
-        # logger.debug("1- proposals: {}".format(proposals_2.shape))
         # Run head on the given proposals
-        # proposals = PackedSequence(proposals)
-        # proposals, proposals_idx = proposals.contiguous
-        proposals = torch.stack(proposals, dim=0)
+        # proposals = torch.stack(proposals, dim=0)
         proposals, proposals_idx = g_packed_sequence_contiguous(proposals)
-        # logger.debug("2- proposals: {}, idx: {}".format(proposals.shape, proposals_idx))
-        # logger.debug("InstanceSegAlgoFPN, proposals: {}".format(proposals.shape))
-        cls_logits, bbx_logits = self._head_bbx(x, proposals, proposals_idx, img_size)
-        # logger.debug("InstanceSegAlgoFPN, FPNMaskHead-1, cls_logits: {}, bbx_logits: {}".format(cls_logits.shape, bbx_logits.shape))
+        cls_logits, bbx_logits = self._head_bbx(x, proposals, proposals_idx, self.valid_size[0])
         
         # Shift the proposals according to the logits
-        # bbx_reg_weights = x[0].new(self.bbx_reg_weights)
         bbx_reg_weights = torch.tensor(self.bbx_reg_weights).to(x[0].device)
 
         boxes = g_shift_boxes(proposals.unsqueeze(1), bbx_logits / bbx_reg_weights)
         scores = torch.softmax(cls_logits, dim=1)
 
         # Split boxes and scores by image, clip to valid size
-        boxes, scores = self._split_and_clip(boxes, scores, proposals_idx, valid_size)
-        if len(boxes) < 1 or len(scores) < 1:
-            # return bbx_pred, cls_pred, obj_pred, msk_logits
-            return self.return_empty()
-        boxes = torch.stack(boxes, dim=0)
-        scores = torch.stack(scores, dim=0)
+        boxes, scores = self._split_and_clip(boxes, scores, proposals_idx, self.valid_size)
+
         # Do nms to find final predictions
-        # logger.debug("g_prediction_generator input: boxes: {}, scores: {}".format(boxes.shape, scores.shape))
-        # logger.debug("g_prediction_generator code: {}".format(g_prediction_generator.code))
         bbx_pred, cls_pred, obj_pred = g_prediction_generator(boxes, scores, self.nms_threshold, self.score_threshold, self.max_predictions)
-        # logger.debug("PredictionGenerator, bbx_pred: {}, cls_pred: {}, obj_pred: {}".format(bbx_pred, cls_pred, obj_pred))
 
-        if len(bbx_pred) < 1:
-            # return bbx_pred, cls_pred, obj_pred, msk_logits
-            return self.return_empty()
-
-        # bbx_pred = PackedSequence(bbx_pred)
-        # cls_pred = PackedSequence(cls_pred)
-        # obj_pred = PackedSequence(obj_pred)
         # Run head again on the finalized boxes to compute instance masks
-        # proposals, proposals_idx = bbx_pred.contiguous
-        proposals, proposals_idx = g_packed_sequence_contiguous(torch.stack(bbx_pred, dim=0))
-        # logger.debug("3- proposals: {}, idx: {}".format(proposals.shape, proposals_idx))
-        # proposals = torch.cat(bbx_pred, dim=0)
-        # proposals_idx 
-        msk_logits = self._head_msk(x, proposals, proposals_idx, img_size)
-        # logger.debug("InstanceSegAlgoFPN, FPNMaskHead-2, proposals: {}, proposals_idx: {}, msk_logits: {}".format(proposals.shape, proposals_idx.shape, msk_logits.shape))
+        proposals, proposals_idx = g_packed_sequence_contiguous(bbx_pred)
+        msk_logits = self._head_msk(x, proposals, proposals_idx, self.valid_size[0])
 
         # Finalize instance mask computation
         batch_size = len(bbx_pred)
-        # msk_pred = self.msk_prediction_generator(cls_pred, msk_logits)
         msk_logits = self._make_batch_list( msk_logits, proposals_idx, batch_size)
 
         # bbx_pred = torch.stack(bbx_pred, dim=0)

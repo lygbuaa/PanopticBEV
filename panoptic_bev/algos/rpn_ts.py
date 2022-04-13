@@ -25,7 +25,7 @@ def g_proposal_generator(boxes:torch.Tensor, scores:torch.Tensor, nms_threshold:
         Sequence of N tensors of selected bounding boxes with shape M_i x 4, entries can be None
     """
 
-    proposals = []
+    proposals = torch.empty([0, 4], dtype=torch.float, device=boxes.device)
     for bbx_i, obj_i in zip(boxes, scores):
         # Score pre-selection
         obj_i, idx = obj_i.topk(min(obj_i.size(0), num_pre_nms))
@@ -35,14 +35,15 @@ def g_proposal_generator(boxes:torch.Tensor, scores:torch.Tensor, nms_threshold:
         # idx = nms(bbx_i, obj_i, self.nms_threshold, num_post_nms)
         # idx = torch.ops.po_cpp_ops.po_nms(bbx_i, obj_i, nms_threshold, num_post_nms)
         idx = torchvision_nms(bbx_i, obj_i, nms_threshold, num_post_nms)
-        # print("ProposalGenerator bbx_i: {}, obj_i: {}, idx: {}, proposals len: {}".format(bbx_i.shape, obj_i.shape, idx.shape, len(proposals)))
+        print("ProposalGenerator bbx_i: {}, obj_i: {}, idx: {}, proposals len: {}".format(bbx_i.shape, obj_i.shape, idx.shape, len(proposals)))
 
         # if idx.numel() == 0:
         #     return [None]
         bbx_i = bbx_i[idx]
-        proposals.append(bbx_i)
-    return proposals
-    # return torch.stack(proposals, dim=0)
+        # proposals.append(bbx_i)
+        proposals = torch.cat((proposals, bbx_i))
+        
+    return torch.unsqueeze(proposals, dim=0)
 
 class RPNAlgoFPN_JIT(torch.nn.Module):
     """RPN algorithm for FPN-based region proposal networks

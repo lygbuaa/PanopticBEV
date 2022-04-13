@@ -35,9 +35,11 @@ class PanopticBevNetJIT(nn.Module):
         self.rpn_algo_jit = torch.jit.load(self.rpn_algo_jit_path)
         logger.debug("load rpn_algo: {}".format(self.rpn_algo_jit_path))
 
-        self.roi_algo_jit_path = "../jit/roi_algo.pt"
+        self.roi_algo_jit_path = "../jit/roi_algo_fake.pt"
         self.roi_algo_jit = torch.jit.load(self.roi_algo_jit_path)
         logger.debug("load roi_algo: {}".format(self.roi_algo_jit_path))
+
+        self.roi_algo_onnx_path = "../jit/roi_algo.onnx"
 
         self.sem_algo_jit_path = "../jit/sem_algo.pt"
         self.sem_algo_jit = torch.jit.load(self.sem_algo_jit_path)
@@ -147,6 +149,10 @@ class PanopticBevNetJIT(nn.Module):
         end_time = time.time()
         logger.debug("roi-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
 
+        torch.onnx.export(self.roi_algo_jit, (ms_bev, proposals, self.valid_size, self.img_size_t), self.roi_algo_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
+        sys.exit(0)
+
+
         # Segmentation Part
         start_time = time.time()
         logger.debug("sem-in, {}".format(start_time))
@@ -168,12 +174,14 @@ class PanopticBevNetJIT(nn.Module):
         start_time = time.time()
         logger.debug("fusion-in, {}".format(start_time))
         for i in range(LOOP):
-            po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+            # po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+            po_pred = po_inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
         end_time = time.time()
         logger.debug("fusion-out, {}, average: {}".format(end_time, (end_time-start_time)/LOOP))
 
         # torch.onnx.export(self.po_fusion_jit, (sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t), self.po_fusion_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
         # sys.exit(0)
+        return [bbx_pred[0], cls_pred[0], obj_pred[0], sem_pred, po_pred[0], po_pred[1], po_pred[2]]
 
         # Prepare outputs
         # PREDICTIONS

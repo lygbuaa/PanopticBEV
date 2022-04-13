@@ -4,6 +4,25 @@
 import numpy as np
 import torch, torchvision
 
+def fake_head_roi_msk(rois:torch.Tensor):
+    N, _, _, _ = rois.shape
+    msk_logits = torch.rand(N, 4, 28, 28, dtype=torch.float, device=rois.device)
+    return msk_logits
+
+def fake_head_roi_bbx(rois:torch.Tensor):
+    N, _, _, _ = rois.shape
+    cls_logits = torch.rand(N, 5, dtype=torch.float, device=rois.device)
+    bbx_logits = torch.rand(N, 4, 4, dtype=torch.float, device=rois.device)
+    return cls_logits, bbx_logits
+
+def fake_po_roi(x: torch.Tensor, bbx: torch.Tensor, idx: torch.Tensor, out_size: torch.Tensor):
+    _, C, _, _ = x.shape
+    N, _ = bbx.shape
+    H = out_size[0]
+    W = out_size[1]
+    rois = torch.rand(N, C, H, W, dtype=torch.float, device=x.device)
+    return rois
+
 def torchvision_nms(bbx:torch.Tensor, scores:torch.Tensor, threshold:float, n_max:int):
     idx = torchvision.ops.nms(bbx, scores, threshold)
     return idx
