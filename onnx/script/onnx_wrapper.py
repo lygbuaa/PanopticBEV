@@ -10,7 +10,7 @@ import onnx
 import onnxruntime as ort
 import onnxsim
 from panoptic_bev.utils import plogging
-plogging.init("./", "onnx_wrapper")
+# plogging.init("./", "onnx_wrapper")
 logger = plogging.get_logger()
 
 class OnnxWrapper(object):
@@ -91,6 +91,7 @@ class OnnxWrapper(object):
         output_np_list = self.run_onnx_model(self.ortss, input_np_list)
         output_tensor_list = []
         for idx, output_np in enumerate(output_np_list):
+            logger.debug("make tensor {} from {}".format(idx, output_np.shape))
             output_tensor = torch.tensor(output_np, device=device)
             output_tensor_list.append(output_tensor)
         return output_tensor_list
@@ -179,7 +180,32 @@ class OnnxWrapper(object):
             logger.error("onnx check model error: {}".format(e))
             return False
 
-        self.load_onnx_model(model_path)
+        ortss = self.load_onnx_model(model_path)
+        sem_logits = np.random.rand(1, 10, 896, 1536).astype(np.float32)
+        roi_msk_logits = np.random.rand(1, 11, 4, 28, 28).astype(np.float32)
+        bbx_pred = np.random.rand(1, 11, 4).astype(np.float32)
+        cls_pred = np.random.rand(1, 11).astype(np.int)
+        self.benchmark(ortss, [sem_logits, roi_msk_logits, bbx_pred, cls_pred], nwarmup=10, nruns=100)
+        return True
+
+    def test_po_fusion_v2(self, model_path):
+        model = onnx.load(model_path)
+        try:
+            onnx.checker.check_model(model)
+            # logger.info(onnx.helper.printable_graph(model.graph))
+            logger.info(model.graph)
+        except Exception as e:
+            logger.error("onnx check model error: {}".format(e))
+            return False
+
+        ortss = self.load_onnx_model(model_path)
+        sem_logits = torch.rand([1, 10, 896, 1536], dtype=torch.float)
+        roi_msk_logits = torch.rand([1, 11, 4, 28, 28], dtype=torch.float)
+        bbx_pred = torch.rand([1, 11, 4], dtype=torch.float)
+        cls_pred = torch.rand([1, 11], dtype=torch.float).to(torch.int64)
+        po_pred = self.run([sem_logits, roi_msk_logits, bbx_pred, cls_pred])
+        logger.debug("po_pred: {}".format(po_pred))
+        return True
 
     def test_resnet50(self, model_path):
         model = onnx.load(model_path)
@@ -211,9 +237,9 @@ if __name__ == "__main__":
     roi_algo_onnx_path = "../roi_algo_op13.onnx"
     onwp = OnnxWrapper()
     # onwp.simplify_onnx_model(roi_algo_onnx_path)
-    onwp.test_roi_algo(roi_algo_onnx_path)
+    # onwp.test_roi_algo(roi_algo_onnx_path)
     # onwp.test_rpn_algo(rpn_algo_onnx_path)
-    # onwp.test_po_fusion(po_fusion_onnx_path)
+    onwp.test_po_fusion_v2(po_fusion_onnx_path)
     # onwp.simplify_onnx_model(sem_algo_onnx_path)
     # onwp.test_torch()
     # onwp.simplify_onnx_model(encoder_path)

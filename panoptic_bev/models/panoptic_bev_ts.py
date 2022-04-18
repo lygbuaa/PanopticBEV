@@ -66,7 +66,6 @@ class PanopticBevNetTs(nn.Module):
         # Modules
         self.rpn_head = rpn_head
         self.roi_head = roi_head
-
         self.sem_head = sem_head
 
         # Algorithms
@@ -106,13 +105,9 @@ class PanopticBevNetTs(nn.Module):
             logger.debug("load po_fusion: {}".format(self.po_fusion_jit_path))
        
         self.po_fusion_onnx_path = "../onnx/po_fusion_op13.onnx"
-
         if g_toggle_po_onnx:
-            self.po_fusion_onnx = OnnxWrapper(self.po_fusion_onnx_path)
-        
-        # self.po_fusion = Pofusion_ONNX()
-        # self.po_fusion_script = torch.jit.script(self.po_fusion)
-        # torch.jit.save(self.po_fusion_script, self.po_fusion_jit_path)
+            self.po_fusion_onnx = OnnxWrapper()
+            self.po_fusion_onnx.load_onnx_model(self.po_fusion_onnx_path)
 
         # Params
         self.dataset = dataset
@@ -134,6 +129,10 @@ class PanopticBevNetTs(nn.Module):
             ms_bev_tmp = torch.zeros(1, 256, int(W/scale), int(Z/scale))
             logger.debug("{}- scale: {} append ms_bev: {}".format(idx, scale, ms_bev_tmp.shape))
             self.ms_bev_0.append(ms_bev_tmp)
+
+        self.po_fusion = Pofusion_ONNX(self.img_size_t)
+        # self.po_fusion_script = torch.jit.script(self.po_fusion)
+        # torch.jit.save(self.po_fusion_script, self.po_fusion_jit_path)
 
     def load_trained_params(self):
         self.rpn_algo.set_head(self.rpn_head)
@@ -219,32 +218,33 @@ class PanopticBevNetTs(nn.Module):
 
         # ROI Part
         if g_toggle_roi_jit:
-            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.roi_algo_jit(ms_bev, proposals)
+            bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.roi_algo_jit(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals)
         elif g_toggle_roi_onnx:
             bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.roi_algo_onnx.run([ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals])
         else:
             bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals)
 
-        roi_algo_jit = torch.jit.script(self.inst_algo)
-        torch.onnx.export(
-            model=roi_algo_jit, 
-            args=(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals),
-            f=self.roi_algo_onnx_path,
-            input_names=["ms_bev_0", "ms_bev_1", "ms_bev_2", "ms_bev_3", "proposals"],
-            output_names=["bbx_pred", "cls_pred", "obj_pred", "roi_msk_logits"],
-            dynamic_axes={
-                    "ms_bev_0": [0],
-                    "ms_bev_1": [0],
-                    "ms_bev_2": [0],
-                    "ms_bev_3": [0],
-                    "proposals": [0, 1],
-                    "bbx_pred": [1],
-                    "cls_pred": [1],
-                    "obj_pred": [1], 
-                    "roi_msk_logits": [1],
-                  },
-            opset_version=13, verbose=True, do_constant_folding=True)
-        sys.exit(0)
+        # roi_algo_jit = torch.jit.script(self.inst_algo)
+        # torch.jit.save(roi_algo_jit, self.roi_algo_jit_path)
+        # torch.onnx.export(
+        #     model=roi_algo_jit, 
+        #     args=(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals),
+        #     f=self.roi_algo_onnx_path,
+        #     input_names=["ms_bev_0", "ms_bev_1", "ms_bev_2", "ms_bev_3", "proposals"],
+        #     output_names=["bbx_pred", "cls_pred", "obj_pred", "roi_msk_logits"],
+        #     dynamic_axes={
+        #             "ms_bev_0": [0],
+        #             "ms_bev_1": [0],
+        #             "ms_bev_2": [0],
+        #             "ms_bev_3": [0],
+        #             "proposals": [0, 1],
+        #             "bbx_pred": [1],
+        #             "cls_pred": [1],
+        #             "obj_pred": [1], 
+        #             "roi_msk_logits": [1],
+        #           },
+        #     opset_version=13, verbose=True, do_constant_folding=True)
+        # sys.exit(0)
 
         # Segmentation Part
         if g_toggle_semantic_jit:
@@ -267,23 +267,39 @@ class PanopticBevNetTs(nn.Module):
         # bbx_pred = torch.stack(bbx_pred, dim=0)
         # cls_pred = torch.stack(cls_pred, dim=0)
         # roi_msk_logits = torch.stack(roi_msk_logits, dim=0)
-        logger.debug("po_fusion input: sem_logits: {}, roi_msk_logits: {}, bbx_pred: {}, cls_pred: {}".format(sem_logits.shape, roi_msk_logits.shape, bbx_pred, cls_pred))
-        
+        logger.debug("po_fusion input: sem_logits: {}-{}, roi_msk_logits: {}-{}, bbx_pred: {}-{}, cls_pred: {}-{}".format(sem_logits.shape, sem_logits.dtype, roi_msk_logits.shape, roi_msk_logits.dtype, bbx_pred.shape, bbx_pred.dtype, cls_pred.shape, cls_pred.dtype))
+
+        # sem_logits = torch.rand([1, 10, 896, 1536], dtype=torch.float)
+        # roi_msk_logits = torch.rand([1, 11, 4, 28, 28], dtype=torch.float)
+        # bbx_pred = torch.rand([1, 11, 4], dtype=torch.float)
+        # cls_pred = torch.rand([1, 11], dtype=torch.float).to(torch.int64)
+
         if g_toggle_po_jit:
-            po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+            po_pred = self.po_fusion_jit(sem_logits, roi_msk_logits, bbx_pred, cls_pred)
         elif g_toggle_po_onnx:
             # onnxruntime load model failed, problem with torch.unique, torch.loop
-            self.po_fusion_onnx.run([sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t])
+            po_pred_seamless, po_cls, po_iscrowd = self.po_fusion_onnx.run([sem_logits, roi_msk_logits, bbx_pred, cls_pred])
         else:
-            po_pred = po_inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
-            # po_pred = self.po_fusion_script(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
-        # torch.jit.save(po_inference, self.po_fusion_jit_path)
-        # sys.exit(0)
+            # po_pred = po_inference(sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t)
+            po_pred_seamless, po_cls, po_iscrowd = self.po_fusion(sem_logits, roi_msk_logits, bbx_pred, cls_pred)
 
-        # torch.onnx.export(self.po_fusion, (sem_logits, roi_msk_logits, bbx_pred, cls_pred, self.img_size_t), self.po_fusion_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
-        # sys.exit(0)
+            po_fusion_jit = torch.jit.script(self.po_fusion)
+            # logger.debug("po_fusion_jit: {}".format(po_fusion_jit.graph))
+            torch.onnx.export(
+                model=po_fusion_jit, 
+                args=(sem_logits, roi_msk_logits, bbx_pred, cls_pred), 
+                f=self.po_fusion_onnx_path, 
+                input_names=["sem_logits", "roi_msk_logits", "bbx_pred", "cls_pred"],
+                output_names=["po_pred_seamless", "po_cls", "po_iscrowd"],
+                dynamic_axes={
+                        "roi_msk_logits": [1],
+                        "bbx_pred": [1],
+                        "cls_pred": [1],
+                      },
+                opset_version=13, verbose=True, do_constant_folding=True)
+            sys.exit(0)
 
-        return [bbx_pred[0], cls_pred[0], obj_pred[0], sem_pred, po_pred[0], po_pred[1], po_pred[2]]
+        return [bbx_pred[0], cls_pred[0], obj_pred[0], sem_pred, po_pred_seamless, po_cls, po_iscrowd]
 
         # Prepare outputs
         # PREDICTIONS
