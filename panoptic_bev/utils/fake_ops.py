@@ -4,6 +4,22 @@
 import numpy as np
 import torch, torchvision
 
+def fake_target_level(boxes:torch.Tensor):
+    N, _ = boxes.shape
+    target_level = torch.rand([N], dtype = torch.float, device=boxes.device)
+    return target_level
+
+def fake_prediction_generator(boxes:torch.Tensor, scores:torch.Tensor, nms_threshold:float=0.3, score_threshold:float=0.1, max_predictions:int=100):
+    bbx_pred = torch.rand([2, 4], dtype=torch.float, device=boxes.device)
+    cls_pred = torch.tensor([6, 7], dtype = torch.long, device=boxes.device)
+    obj_pred = torch.rand([2], dtype = torch.float, device=boxes.device)
+    return torch.unsqueeze(bbx_pred, dim=0), torch.unsqueeze(cls_pred, dim=0), torch.unsqueeze(obj_pred, dim=0)
+
+def fake_shift_boxes(bbx:torch.Tensor, shift:torch.Tensor, dim:int=-1):
+    N, _, _ = bbx.shape
+    boxes = torch.rand(N, 4, 4, dtype=torch.float, device=bbx.device)
+    return boxes
+
 def fake_head_roi_msk(rois:torch.Tensor):
     N, _, _, _ = rois.shape
     msk_logits = torch.rand(N, 4, 28, 28, dtype=torch.float, device=rois.device)
@@ -26,6 +42,21 @@ def fake_po_roi(x: torch.Tensor, bbx: torch.Tensor, idx: torch.Tensor, out_size:
 def torchvision_nms(bbx:torch.Tensor, scores:torch.Tensor, threshold:float, n_max:int):
     idx = torchvision.ops.nms(bbx, scores, threshold)
     return idx
+
+def fake_idx(target_level:torch.Tensor, idx_level:int):
+    idx = torch.rand(16, dtype=torch.float, device=target_level.device)*16
+    # idx = torch.tensor([0], device=target_level.device).expand(target_level.size(dim=0))
+    return idx.type(torch.long)
+    # tmp = torch.tensor([idx_level], dtype=torch.long, device=target_level.device)#.expand(target_level.size(dim=0))
+    # return target_level == tmp
+    # return tmp
+    # return target_level.eq(tmp)
+    # idx = torch.tensor([True], device=target_level.device).expand(target_level.size(dim=0))
+    # return idx
+
+def fake_rois(proposals):
+    N, _ = proposals.shape
+    return torch.tensor([N, 256, 14, 14], dtype=torch.float, device=proposals.device)
 
 def fake_po_nms(bbx:torch.Tensor, scores:torch.Tensor, threshold:float, n_max:int):
     idx = torch.rand(300, dtype=torch.float, device=bbx.device)*n_max

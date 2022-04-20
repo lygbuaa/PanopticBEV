@@ -9,7 +9,7 @@ from panoptic_bev.utils.parallel import PackedSequence
 from panoptic_bev.utils.roi_sampling import roi_sampling
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
-from panoptic_bev.utils.fake_ops import torchvision_nms, fake_po_roi, fake_head_roi_bbx, fake_head_roi_msk
+from panoptic_bev.utils.fake_ops import torchvision_nms, fake_po_roi, fake_head_roi_bbx, fake_head_roi_msk, fake_shift_boxes, fake_prediction_generator, fake_target_level, fake_idx, fake_rois
 
 
 @torch.jit.script
@@ -63,8 +63,8 @@ def g_rois(
     # stride = proposals.new([fs / os for fs, os in zip(x.shape[-2:], img_size)])
     stride = torch.stack([fs / os for fs, os in zip(x.shape[-2:], img_size)], dim=0).to(x.device)
     proposals = (proposals - 0.5) * stride.repeat(2) + 0.5
-    # rois, msk = torch.ops.po_cpp_ops.po_roi(x, proposals, proposals_idx, roi_size)
-    rois = fake_po_roi(x, proposals, proposals_idx, roi_size)
+    rois, msk = torch.ops.po_cpp_ops.po_roi(x, proposals, proposals_idx, roi_size)
+    # rois = fake_po_roi(x, proposals, proposals_idx, roi_size)
     # print("g_rois--- x: {}, proposals: {}, proposals_idx: {}, roi_size: {}, rois: {}".format(x.shape, proposals.shape, proposals_idx.shape, roi_size, rois.shape))
     return rois
 
@@ -198,12 +198,12 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
         self.bbx_loss = bbx_loss
         self.msk_loss = msk_loss
         self.bbx_reg_weights = bbx_reg_weights
-        self.canonical_scale = canonical_scale
-        self.canonical_level = canonical_level
+        self.canonical_scale = canonical_scale #224
+        self.canonical_level = canonical_level #2
         # self.roi_size = roi_size
         self.roi_size = torch.tensor(roi_size, dtype=torch.int)
-        self.min_level = min_level
-        self.levels = levels
+        self.min_level = min_level #0
+        self.levels = levels #4
         self.nms_threshold = nms_threshold
         self.score_threshold = score_threshold
         self.max_predictions = max_predictions
@@ -238,6 +238,7 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
     def _head_bbx(self, x:List[torch.Tensor], proposals:torch.Tensor, proposals_idx:torch.Tensor, img_size:torch.Tensor):
         # Find target levels
         target_level = self._target_level(proposals)
+        # print("_target_level bbx, proposals: {}, target_level: {}".format(proposals.shape, target_level.shape))
 
         # Sample rois
         rois = x[0].new_zeros(proposals.size(0), x[0].size(1), self.roi_size[0], self.roi_size[1])
@@ -245,7 +246,14 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
             idx = target_level == (level_i + self.min_level)
             if idx.any().item():
                 # ONNXRuntimeError: right operand cannot broadcast on dim 3 LeftShape: {256}, RightShape: {256,256,14,14}
-                rois[idx] = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
+                # rois[idx] = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
+                tmp_r = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
+                # print("_head_bbx, rois: {}, idx: {}, tmp_l: {}, tmp_r: {}".format(rois.shape, idx.shape, tmp_l.shape, tmp_r.shape))
+                ii = 0
+                for jj, bval in enumerate(idx):
+                    if bval:
+                        rois[jj] = tmp_r[ii]
+                        ii += 1
 
         # Run head
         # This is to prevent batch norm from crashing when there is only ony proposal.
@@ -269,13 +277,21 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
     def _head_msk(self, x:List[torch.Tensor], proposals:torch.Tensor, proposals_idx:torch.Tensor, img_size:torch.Tensor):
         # Find target levels
         target_level = self._target_level(proposals)
+        # print("_target_level msk, proposals: {}, target_level: {}".format(proposals.shape, target_level.shape))
 
         # Sample rois
         rois = x[0].new_zeros(proposals.size(0), x[0].size(1), self.roi_size[0], self.roi_size[1])
         for level_i, x_i in enumerate(x):
             idx = target_level == (level_i + self.min_level)
+            # idx = fake_idx(target_level, (level_i + self.min_level))
             if idx.any().item():
-                rois[idx] = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
+                # rois[idx] = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
+                tmp_r = g_rois(x_i, proposals[idx], proposals_idx[idx], img_size, self.roi_size)
+                ii = 0
+                for jj, bval in enumerate(idx):
+                    if bval:
+                        rois[jj] = tmp_r[ii]
+                        ii += 1
 
         # Run head
         # This is to prevent batch norm from crashing when there is only ony proposal.
@@ -290,14 +306,6 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
         if prune:
             msk_logits = msk_logits[0, ...].unsqueeze(0)
         return msk_logits
-
-    def _get_bbox_idxs(self, bbx:torch.Tensor, bbx_gt:torch.Tensor)->torch.Tensor:
-        bbx_gt_idxs = torch.zeros(bbx_gt.shape[0], dtype=torch.int64, device=bbx[0].device)
-        start = 0
-        for idx, bbx_i in enumerate(bbx):
-            bbx_gt_idxs[start:start+bbx_i.shape[0]] = idx
-            start += bbx_i.shape[0]
-        return bbx_gt_idxs
 
     def _make_batch_list(self, msk_gt_logits:torch.Tensor, bbx_gt_idx:torch.Tensor, batch_size:int):
         # msk_gt_list = []
@@ -328,13 +336,8 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
     def forward(self, x0:torch.Tensor, x1:torch.Tensor, x2:torch.Tensor, x3:torch.Tensor, proposals:torch.Tensor):
         # x = x[self.min_level:self.min_level + self.levels]
         x = [x0, x1, x2, x3]
-        bbx_pred = []
-        cls_pred = []
-        obj_pred = []
-        msk_logits = []
 
-        _, N, _ = proposals.shape
-        if N < 1:
+        if proposals.size(dim=1) < 1:
             return self.return_empty(feat=x[0])
 
         # Run head on the given proposals
@@ -346,6 +349,8 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
         bbx_reg_weights = torch.tensor(self.bbx_reg_weights).to(x[0].device)
 
         boxes = g_shift_boxes(proposals.unsqueeze(1), bbx_logits / bbx_reg_weights)
+        # print("g_shift_boxes, proposals: {}-{}, bbx_logits: {}, bbx_reg_weights: {}, boxes: {}".format(proposals.shape, proposals.unsqueeze(1).shape, bbx_logits.shape, bbx_reg_weights.shape, boxes.shape))
+
         scores = torch.softmax(cls_logits, dim=1)
 
         # Split boxes and scores by image, clip to valid size
@@ -354,17 +359,15 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
         # Do nms to find final predictions
         bbx_pred, cls_pred, obj_pred = g_prediction_generator(boxes, scores, self.nms_threshold, self.score_threshold, self.max_predictions)
 
+        if bbx_pred.size(dim=1) < 1:
+            return self.return_empty(feat=x[0])
         # Run head again on the finalized boxes to compute instance masks
         proposals, proposals_idx = g_packed_sequence_contiguous(bbx_pred)
         msk_logits = self._head_msk(x, proposals, proposals_idx, self.valid_size[0])
 
         # Finalize instance mask computation
         batch_size = len(bbx_pred)
-        msk_logits = self._make_batch_list( msk_logits, proposals_idx, batch_size)
-
-        # bbx_pred = torch.stack(bbx_pred, dim=0)
-        # cls_pred = torch.stack(cls_pred, dim=0)
-        # obj_pred = torch.stack(obj_pred, dim=0)
-        # msk_logits = torch.stack(msk_logits, dim=0)
+        msk_logits = self._make_batch_list(msk_logits, proposals_idx, batch_size)
+        # print("_make_batch_list, msk_logits: {}, proposals_idx: {}, batch_size: {}, msk_logits: {}".format(msk_logits.shape, proposals_idx.shape, batch_size, msk_logits.shape))
 
         return bbx_pred, cls_pred, obj_pred, msk_logits

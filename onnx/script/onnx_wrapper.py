@@ -10,7 +10,7 @@ import onnx
 import onnxruntime as ort
 import onnxsim
 from panoptic_bev.utils import plogging
-# plogging.init("./", "onnx_wrapper")
+plogging.init("./", "onnx_wrapper")
 logger = plogging.get_logger()
 
 class OnnxWrapper(object):
@@ -156,7 +156,7 @@ class OnnxWrapper(object):
         try:
             onnx.checker.check_model(model)
             # logger.info(onnx.helper.printable_graph(model.graph))
-            # logger.info('onnx model graph is:\n{}'.format(model.graph))
+            logger.info('onnx model graph is:\n{}'.format(model.graph))
         except Exception as e:
             logger.error("onnx check model error: {}".format(e))
             return False
@@ -167,7 +167,7 @@ class OnnxWrapper(object):
         ms_bev_2 = np.random.rand(1, 256, 56, 96).astype(np.float32)
         ms_bev_3 = np.random.rand(1, 256, 28, 48).astype(np.float32)
         proposals = np.random.rand(1, 74, 4).astype(np.float32)
-        self.benchmark(ortss, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3, proposals], nwarmup=100, nruns=100)
+        self.benchmark(ortss, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3, proposals], nwarmup=10, nruns=100)
         return True
 
     def test_po_fusion(self, model_path):
@@ -175,7 +175,7 @@ class OnnxWrapper(object):
         try:
             onnx.checker.check_model(model)
             # logger.info(onnx.helper.printable_graph(model.graph))
-            logger.info(model.graph)
+            # logger.info(model.graph)
         except Exception as e:
             logger.error("onnx check model error: {}".format(e))
             return False
@@ -237,9 +237,9 @@ if __name__ == "__main__":
     roi_algo_onnx_path = "../roi_algo_op13.onnx"
     onwp = OnnxWrapper()
     # onwp.simplify_onnx_model(roi_algo_onnx_path)
-    # onwp.test_roi_algo(roi_algo_onnx_path)
+    onwp.test_roi_algo(roi_algo_onnx_path)
     # onwp.test_rpn_algo(rpn_algo_onnx_path)
-    onwp.test_po_fusion_v2(po_fusion_onnx_path)
+    # onwp.test_po_fusion(po_fusion_onnx_path)
     # onwp.simplify_onnx_model(sem_algo_onnx_path)
     # onwp.test_torch()
     # onwp.simplify_onnx_model(encoder_path)
