@@ -2,6 +2,9 @@ import torch
 #import numpy as np
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
+from panoptic_bev.utils.fake_ops import fake_linalg_inv
+
+g_onnx_fake_ops = True
 
 @torch.jit.script
 def compute_M(scale, image_size, px_per_metre):
@@ -86,7 +89,10 @@ def compute_extrinsic_matrix(translation, rotation):
 @torch.jit.script
 def compute_homography(intrinsic_matrix, extrinsic_matrix, M):
     P = torch.matmul(intrinsic_matrix, extrinsic_matrix)
-    H = torch.linalg.inv(P @ M)
+    # if g_onnx_fake_ops:
+    H = fake_linalg_inv(P@M)
+    # else:
+    #     H = torch.linalg.inv(P @ M)
     return H
 
 

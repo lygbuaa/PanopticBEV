@@ -3,15 +3,15 @@ from torch.nn import functional as F
 import torch, math, sys
 # import kornia
 # from kornia.geometry.transform import warp_perspective
-from panoptic_bev.utils.kornia_geometry import warp_perspective
+from panoptic_bev.utils.kornia_geometry_onnx import warp_perspective
 from inplace_abn import ABN
-from panoptic_bev.utils.fake_ops import fake_grid_sample, fake_rot90, fake_deg2rad, fake_affine_grid, fake_warp_perspective
+from panoptic_bev.utils.fake_ops import fake_grid_sample, fake_rot90, fake_deg2rad, fake_affine_grid, fake_linalg_inv
 
 from panoptic_bev.utils.transformer_ts import get_init_homography
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 
-g_onnx_fake_ops = False
+g_onnx_fake_ops = True
 
 class VerticalTransformer(nn.Module):
     def __init__(self, in_ch, v_2d_ch, v_3d_ch, img_size_in, img_size_out, extents, img_scale, resolution, norm_act=ABN):
@@ -157,10 +157,13 @@ class FlatTransformer(nn.Module):
         
         theta_ipm = g_create_theta_ipm(intrinsics, self.extrinsics, self.px_per_metre, torch.tensor(self.img_scale), self.out_img_size_reverse, torch.tensor(feat.shape[0]))
         # print("feat device: {}, theta_ipm device: {}".format(feat.device, theta_ipm.device))
-        if g_onnx_fake_ops:
-            feat_bev_ipm = fake_warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
-        else:
-            feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
+        feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
+        # torch.onnx.export(
+        #     model=warp_perspective, 
+        #     args=(feat, theta_ipm, torch.tensor([int(self.Z_out), int(self.W_out)])),
+        #     f="../onnx/warp_perspective.onnx",
+        #     opset_version=13, verbose=True, do_constant_folding=True)
+        # sys.exit(0)
         # logger.debug("feat: {}, theta_ipm: {}, Z_out: {}, W_out: {}, feat_bev_ipm: {}".format(feat.shape, theta_ipm.shape, self.Z_out, self.W_out, feat_bev_ipm.shape))
         if g_onnx_fake_ops:
             feat_bev_ipm = fake_rot90(feat_bev_ipm, k=2, dims=[2, 3])
@@ -176,10 +179,13 @@ class FlatTransformer(nn.Module):
             ipm_incorrect = fake_rot90(ipm_incorrect, k=2, dims=[2, 3])
         else:
             ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
+
         if g_onnx_fake_ops:
-            ipm_incorrect_fv = fake_warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
+            theta_ipm_inv = fake_linalg_inv(theta_ipm)
         else:
-            ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=torch.inverse(theta_ipm), dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
+            theta_ipm_inv = torch.inverse(theta_ipm)
+
+        ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=theta_ipm_inv, dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
         # logger.debug("ipm_incorrect: {}, theta_ipm: {}, feat: {}, ipm_incorrect_fv: {}".format(ipm_incorrect.shape, theta_ipm.shape, feat.shape, ipm_incorrect_fv.shape))
         feat_ecm_fv = (feat * ipm_incorrect_fv)
 

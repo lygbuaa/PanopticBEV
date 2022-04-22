@@ -95,7 +95,13 @@ def fake_grid_sample(input:torch.Tensor, grid:torch.Tensor):
 
 def fake_linalg_inv(input:torch.Tensor):
     # output = torch.linalg.inv(input)
+    output = torch.inverse(input)
     return input
+
+def fake_repeat_interleave(input:torch.Tensor, repeats:int, dim:int=0):
+    N, H, W = input.shape
+    output = torch.rand(repeats, H, W, dtype=input.dtype, device=input.device)
+    return output
 
 if __name__ == '__main__':
     input = torch.rand(1, 3, 480, 640, dtype=torch.float)
