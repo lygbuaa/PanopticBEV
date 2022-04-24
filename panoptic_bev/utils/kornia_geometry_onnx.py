@@ -3,6 +3,8 @@
 import torch, sys
 import torch.nn.functional as F
 from panoptic_bev.utils.fake_ops import fake_linalg_inv, fake_repeat_interleave, fake_grid_sample
+from panoptic_bev.custom.custom_repeat_interleave import custom_repeat_interleave
+from panoptic_bev.custom.custom_inverse import custom_inverse
 
 g_onnx_fake_ops = True
 
@@ -18,10 +20,7 @@ def _torch_inverse_cast(input: torch.Tensor) -> torch.Tensor:
     # dtype: torch.dtype = input.dtype
     # if dtype not in (torch.float32, torch.float64):
     dtype = torch.float32
-    # if g_onnx_fake_ops:
-    return fake_linalg_inv(input.to(dtype)).to(input.dtype)
-    # else:
-    #     return torch.inverse(input.to(dtype)).to(input.dtype)
+    return custom_inverse(input.to(dtype)).to(input.dtype)
 
 @torch.jit.script
 def normal_transform_pixel(
@@ -216,10 +215,7 @@ def transform_points(trans_01: torch.Tensor, points_1: torch.Tensor) -> torch.Te
     # We expand trans_01 to match the dimensions needed for bmm
     # rpts = torch.div(points_1.shape[0], trans_01.shape[0], rounding_mode='floor').to(trans_01.device)
     rpts = int(points_1.shape[0])# // trans_01.shape[0]
-    # if g_onnx_fake_ops:
-    trans_01 = fake_repeat_interleave(trans_01, repeats=rpts, dim=0)
-    # else:
-        # trans_01 = torch.repeat_interleave(trans_01, repeats=rpts, dim=0)
+    trans_01 = custom_repeat_interleave(trans_01, repeats=rpts, dim=0)
 
     # to homogeneous
     points_1_h = convert_points_to_homogeneous(points_1)  # BxNxD+1
@@ -260,6 +256,6 @@ def warp_perspective(
     #     return _fill_and_warp(src, grid, align_corners=align_corners, mode=mode, fill_value=fill_value)
 
     # if g_onnx_fake_ops:
-    return fake_grid_sample(src, grid)
+    # return fake_grid_sample(src, grid)
     # else:
-    #     return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')
+    return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')

@@ -6,12 +6,15 @@ import torch, math, sys
 from panoptic_bev.utils.kornia_geometry_onnx import warp_perspective
 from inplace_abn import ABN
 from panoptic_bev.utils.fake_ops import fake_grid_sample, fake_rot90, fake_deg2rad, fake_affine_grid, fake_linalg_inv
+from panoptic_bev.custom.custom_rot90 import custom_rot90
+from panoptic_bev.custom.custom_inverse import custom_inverse
+from panoptic_bev.custom.custom_affine_grid import custom_affine_grid
 
 from panoptic_bev.utils.transformer_ts import get_init_homography
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 
-g_onnx_fake_ops = True
+g_onnx_fake_ops = False
 
 class VerticalTransformer(nn.Module):
     def __init__(self, in_ch, v_2d_ch, v_3d_ch, img_size_in, img_size_out, extents, img_scale, resolution, norm_act=ABN):
@@ -165,25 +168,17 @@ class FlatTransformer(nn.Module):
         #     opset_version=13, verbose=True, do_constant_folding=True)
         # sys.exit(0)
         # logger.debug("feat: {}, theta_ipm: {}, Z_out: {}, W_out: {}, feat_bev_ipm: {}".format(feat.shape, theta_ipm.shape, self.Z_out, self.W_out, feat_bev_ipm.shape))
-        if g_onnx_fake_ops:
-            feat_bev_ipm = fake_rot90(feat_bev_ipm, k=2, dims=[2, 3])
-        else:
-            feat_bev_ipm = torch.rot90(feat_bev_ipm, k=2, dims=[2, 3])
+        # feat_bev_ipm = torch.rot90(feat_bev_ipm, k=2, dims=[2, 3])
+        feat_bev_ipm = custom_rot90(feat_bev_ipm, k=2, dims=[2, 3])
 
         # Find the regions where IPM goes wrong and apply the ECN to those regions
         ipm_f_logits = self.ipm_confident_region_estimation(feat_bev_ipm)  # Get the logits where the IPM is "confident"
         ipm_incorrect = 1 - ipm_f_logits.sigmoid()  # Get the mask where the IPM is assumed to be incorrect
 
         # Convert the incorrect mask back into the FV and use it to get the erroneous features in the FV
-        if g_onnx_fake_ops:
-            ipm_incorrect = fake_rot90(ipm_incorrect, k=2, dims=[2, 3])
-        else:
-            ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
-
-        if g_onnx_fake_ops:
-            theta_ipm_inv = fake_linalg_inv(theta_ipm)
-        else:
-            theta_ipm_inv = torch.inverse(theta_ipm)
+        # ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
+        ipm_incorrect = custom_rot90(ipm_incorrect, k=2, dims=[2, 3])
+        theta_ipm_inv = custom_inverse(theta_ipm)
 
         ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=theta_ipm_inv, dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
         # logger.debug("ipm_incorrect: {}, theta_ipm: {}, feat: {}, ipm_incorrect_fv: {}".format(ipm_incorrect.shape, theta_ipm.shape, feat.shape, ipm_incorrect_fv.shape))
@@ -362,10 +357,8 @@ class TransformerVF(nn.Module):
 
         # In the merged features, the ego car is at the bottom and something far away is at the top.
         # Rotate it to match the output --> The ego car is on the left and something far away is towards the right
-        if g_onnx_fake_ops:
-            feat_merged = fake_rot90(feat_merged, k=1, dims=[2, 3])
-        else:
-            feat_merged = torch.rot90(feat_merged, k=1, dims=[2, 3])
+        # feat_merged = torch.rot90(feat_merged, k=1, dims=[2, 3])
+        feat_merged = custom_rot90(feat_merged, k=1, dims=[2, 3])
         # v_region_logits = torch.rot90(v_region_logits, k=1, dims=[2, 3])
         # f_region_logits = torch.rot90(f_region_logits, k=1, dims=[2, 3])
 
@@ -404,10 +397,8 @@ def feat_affine(feat, angle, tx, ty):
     # angle = torch.deg2rad(angle)
     angle = fake_deg2rad(angle)
     theta = torch.stack([torch.stack([torch.cos(angle), torch.sin(-angle), tx]),torch.stack([torch.sin(angle), torch.cos(angle), ty])], dim=0)
-    if g_onnx_fake_ops:
-        grid = fake_affine_grid(theta.unsqueeze(0), feat)
-    else:
-        grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
+    # grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
+    grid = custom_affine_grid(theta.unsqueeze(0), feat, align_corners=False).to(feat.device)
 
     if g_onnx_fake_ops:
         return fake_grid_sample(feat, grid)
