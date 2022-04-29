@@ -9,6 +9,7 @@ from panoptic_bev.utils.fake_ops import fake_grid_sample, fake_rot90, fake_deg2r
 from panoptic_bev.custom.custom_rot90 import custom_rot90
 from panoptic_bev.custom.custom_inverse import custom_inverse
 from panoptic_bev.custom.custom_affine_grid import custom_affine_grid
+from panoptic_bev.custom.custom_grid_sample import custom_grid_sample
 
 from panoptic_bev.utils.transformer_ts import get_init_homography
 from panoptic_bev.utils import plogging
@@ -266,11 +267,9 @@ class Perspective2OrthographicWarper(nn.Module):
         # Resample 3D feature map
         grid_coords = torch.stack([ucoords, zcoords], -1).clamp(-1.1, 1.1)
 
-        if g_onnx_fake_ops:
-            return fake_grid_sample(features, grid_coords)
-        else:
-            return F.grid_sample(features, grid_coords, align_corners=False)
-
+        # return fake_grid_sample(features, grid_coords)
+        # return F.grid_sample(features, grid_coords, align_corners=False)
+        return custom_grid_sample(features, grid_coords)
 
     def _make_grid(self, extents, resolution):
     # Create a grid of coordinates in the birds-eye-view
@@ -400,10 +399,9 @@ def feat_affine(feat, angle, tx, ty):
     # grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
     grid = custom_affine_grid(theta.unsqueeze(0), feat, align_corners=False).to(feat.device)
 
-    if g_onnx_fake_ops:
-        return fake_grid_sample(feat, grid)
-    else:
-        return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False).to(feat.device)
+    # return fake_grid_sample(feat, grid)
+    # return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False).to(feat.device)
+    return custom_grid_sample(feat, grid)
 
 def g_create_theta_ipm(intrinsics, extrinsics, px_per_metre, img_scale, out_img_size_reverse, fshape=0):
     # self.theta_ipm = torch.tensor([[[-2.1252e-02, -3.8398e-01,  2.5564e+01],

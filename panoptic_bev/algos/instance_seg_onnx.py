@@ -10,7 +10,7 @@ from panoptic_bev.utils.roi_sampling import roi_sampling
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 from panoptic_bev.utils.fake_ops import torchvision_nms, fake_po_roi, fake_head_roi_bbx, fake_head_roi_msk, fake_shift_boxes, fake_prediction_generator, fake_target_level, fake_idx, fake_rois
-
+from panoptic_bev.custom.custom_po_roi import custom_po_roi
 
 @torch.jit.script
 def g_shift_boxes(bbx:torch.Tensor, shift:torch.Tensor, dim:int=-1, scale_clip:float=log(1000. / 16.)):
@@ -63,8 +63,8 @@ def g_rois(
     # stride = proposals.new([fs / os for fs, os in zip(x.shape[-2:], img_size)])
     stride = torch.stack([fs / os for fs, os in zip(x.shape[-2:], img_size)], dim=0).to(x.device)
     proposals = (proposals - 0.5) * stride.repeat(2) + 0.5
-    rois, msk = torch.ops.po_cpp_ops.po_roi(x, proposals, proposals_idx, roi_size)
-    # rois = fake_po_roi(x, proposals, proposals_idx, roi_size)
+    # rois = torch.ops.po_cpp_ops.po_roi(x, proposals, proposals_idx, roi_size)
+    rois = custom_po_roi(x, proposals, proposals_idx, roi_size)
     # print("g_rois--- x: {}, proposals: {}, proposals_idx: {}, roi_size: {}, rois: {}".format(x.shape, proposals.shape, proposals_idx.shape, roi_size, rois.shape))
     return rois
 

@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from panoptic_bev.utils.fake_ops import fake_linalg_inv, fake_repeat_interleave, fake_grid_sample
 from panoptic_bev.custom.custom_repeat_interleave import custom_repeat_interleave
 from panoptic_bev.custom.custom_inverse import custom_inverse
+from panoptic_bev.custom.custom_grid_sample import custom_grid_sample
 
 g_onnx_fake_ops = True
 
@@ -255,7 +256,6 @@ def warp_perspective(
     # if padding_mode == "fill":
     #     return _fill_and_warp(src, grid, align_corners=align_corners, mode=mode, fill_value=fill_value)
 
-    # if g_onnx_fake_ops:
     # return fake_grid_sample(src, grid)
-    # else:
-    return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')
+    # return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')
+    return custom_grid_sample(src, grid)

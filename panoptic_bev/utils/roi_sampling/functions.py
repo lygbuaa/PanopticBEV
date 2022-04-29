@@ -89,7 +89,8 @@ def roi_sampling(x, bbx, idx, roi_size, interpolation="bilinear", padding="borde
 
     # for jit.trace, deprecate valid_mask
     # y, _ = _backend.roi_sampling_forward(x, bbx, idx, roi_size, _backend.Interpolation.Bilinear, _backend.PaddingMode.Zero, valid_mask)
-    y, _ = _backend.roi_sampling_forward(x, bbx, idx, roi_size)
+    # y, _ = _backend.roi_sampling_forward(x, bbx, idx, roi_size)
+    y = _backend.roi_sampling_forward(x, bbx, idx, roi_size)
     return y
 
     # return ROISampling.apply(x, bbx, idx, roi_size, interpolation, padding, valid_mask)

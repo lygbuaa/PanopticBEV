@@ -78,7 +78,8 @@ void roi_sampling_forward_template(
   }));
 }
 
-std::tuple<at::Tensor, at::Tensor> roi_sampling_forward_cuda(
+// std::tuple<at::Tensor, at::Tensor> roi_sampling_forward_cuda(
+  at::Tensor roi_sampling_forward_cuda(
     const at::Tensor& x, const at::Tensor& bbx, const at::Tensor& idx, std::tuple<int, int> out_size,
     Interpolation interpolation, PaddingMode padding, bool valid_mask) {
 
@@ -98,7 +99,8 @@ std::tuple<at::Tensor, at::Tensor> roi_sampling_forward_cuda(
     }
   }));
 
-  return std::make_tuple(y, mask);
+  // return std::make_tuple(y, mask);
+  return y;
 }
 
 template<typename scalar_t, typename coord_t, typename index_t, typename Sampler>

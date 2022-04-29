@@ -16,7 +16,9 @@ torch.ops.load_library("_backend.cpython-38-x86_64-linux-gnu.so")
 
 def roi_sampling_forward(
         x: torch.Tensor, bbx: torch.Tensor, idx: torch.Tensor, out_size: torch.Tensor,
-        ) -> Tuple[torch.Tensor, torch.Tensor]: ...
+        ) -> torch.Tensor: ...
+        # ) -> Tuple[torch.Tensor, torch.Tensor]: ...
+
 
 # def roi_sampling_forward(
 #         x: torch.Tensor, bbx: torch.Tensor, idx: torch.Tensor, out_size: Tuple[int, int],

@@ -65,7 +65,7 @@ def test():
     print("torch.inverse: {}\n{}, \nproduct:\n{}".format(x1.shape, x1, x@x1))
     x2 = custom_inverse(input=x)
     diff = x2 - x1
-    print("custom_rot90: {}\n{}\ndiff: \n{}, \nproduct:\n{}".format(x2.shape, x2, diff, x@x2))
+    print("custom_inverse: {}\n{}\ndiff: \n{}, \nproduct:\n{}".format(x2.shape, x2, diff, x@x2))
 
 
 if __name__ == '__main__':

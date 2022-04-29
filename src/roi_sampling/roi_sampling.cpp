@@ -6,7 +6,8 @@
 #include "../../include/utils/checks.h"
 #include "../../include/roi_sampling.h"
 
-std::tuple<at::Tensor, at::Tensor> roi_sampling_forward(
+// std::tuple<at::Tensor, at::Tensor> roi_sampling_forward(
+  at::Tensor roi_sampling_forward(
     const at::Tensor& x, const at::Tensor& bbx, const at::Tensor& idx, const at::Tensor& roi_size) {
   // Check dimensions
   TORCH_CHECK(x.ndimension() == 4, "x must be a 4-dimensional tensor");
