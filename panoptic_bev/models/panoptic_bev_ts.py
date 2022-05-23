@@ -188,8 +188,8 @@ class PanopticBevNetTs(nn.Module):
             # torch.jit.save(transformer_ts, self.transformer_jit_path)
             # sys.exit(0)
 
-            # torch.onnx.export(self.transformer, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
-            # sys.exit(0)
+            torch.onnx.export(self.transformer, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
+            sys.exit(0)
 
 
             # if ms_bev == None:
@@ -224,27 +224,27 @@ class PanopticBevNetTs(nn.Module):
         else:
             bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals)
 
-            roi_algo_jit = torch.jit.script(self.inst_algo)
+            #roi_algo_jit = torch.jit.script(self.inst_algo)
             # torch.jit.save(roi_algo_jit, self.roi_algo_jit_path)
-            torch.onnx.export(
-                model=roi_algo_jit, 
-                args=(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals),
-                f=self.roi_algo_onnx_path,
-                input_names=["ms_bev_0", "ms_bev_1", "ms_bev_2", "ms_bev_3", "proposals"],
-                output_names=["bbx_pred", "cls_pred", "obj_pred", "roi_msk_logits"],
-                dynamic_axes={
-                        "ms_bev_0": [0],
-                        "ms_bev_1": [0],
-                        "ms_bev_2": [0],
-                        "ms_bev_3": [0],
-                        "proposals": [0, 1],
-                        "bbx_pred": [1],
-                        "cls_pred": [1],
-                        "obj_pred": [1], 
-                        "roi_msk_logits": [1],
-                    },
-                opset_version=13, verbose=True, do_constant_folding=True)
-            sys.exit(0)
+            #torch.onnx.export(
+            #    model=roi_algo_jit, 
+            #    args=(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals),
+            #    f=self.roi_algo_onnx_path,
+            #    input_names=["ms_bev_0", "ms_bev_1", "ms_bev_2", "ms_bev_3", "proposals"],
+            #    output_names=["bbx_pred", "cls_pred", "obj_pred", "roi_msk_logits"],
+            #    dynamic_axes={
+            #            "ms_bev_0": [0],
+            #            "ms_bev_1": [0],
+            #            "ms_bev_2": [0],
+            #            "ms_bev_3": [0],
+            #            "proposals": [0, 1],
+            #            "bbx_pred": [1],
+            #            "cls_pred": [1],
+            #            "obj_pred": [1], 
+            #            "roi_msk_logits": [1],
+            #        },
+            #    opset_version=13, verbose=True, do_constant_folding=True)
+            #sys.exit(0)
 
         # Segmentation Part
         if g_toggle_semantic_jit:

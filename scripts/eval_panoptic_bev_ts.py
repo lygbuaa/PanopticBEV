@@ -336,7 +336,7 @@ def make_model(args, config, num_thing, num_stuff):
     # po_fusion_jit = torch.jit.script(po_fusion_ts)
     # torch.jit.save(po_fusion_jit, "../jit/po_fusion_2.pt")
 
-    panoptic_bev_jit = PanopticBevNetJIT(out_shape=out_shape, tfm_scales=tfm_scales)
+    # panoptic_bev_jit = PanopticBevNetJIT(out_shape=out_shape, tfm_scales=tfm_scales)
     # model_jit = torch.jit.script(panoptic_bev_jit)
     # frozen_model = torch.jit.freeze(model_jit)
     # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_2.pt")

@@ -39,15 +39,15 @@ def grid_sampler(g:torch._C.Graph, input:torch._C.Value, grid:torch._C.Value, mo
 
     # From opset v13 onward, the output shape can be specified with
     # (N, C, H, W) (N, H_out, W_out, 2) => (N, C, H_out, W_out)
-    # input_shape = input.type().sizes()
-    # gird_shape = grid.type().sizes()
-    # output_shape = input_shape[:2] + gird_shape[1:3]
+    input_shape = input.type().sizes()
+    gird_shape = grid.type().sizes()
+    output_shape = input_shape[:2] + gird_shape[1:3]
     # g.op(...).setType(input.type().with_sizes(output_shape))
 
     return g.op("com.microsoft::GridSample", input, grid,
                 mode_s=mode_str,
                 padding_mode_s=padding_mode_str,
-                align_corners_i=align_corners)
+                align_corners_i=align_corners).setType(input.type().with_sizes(output_shape))
 
 _reg(grid_sampler)
 
