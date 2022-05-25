@@ -39,12 +39,29 @@ def grid_sampler(g:torch._C.Graph, input:torch._C.Value, grid:torch._C.Value, mo
 
     # From opset v13 onward, the output shape can be specified with
     # (N, C, H, W) (N, H_out, W_out, 2) => (N, C, H_out, W_out)
-    input_shape = input.type().sizes()
-    gird_shape = grid.type().sizes()
-    output_shape = input_shape[:2] + gird_shape[1:3]
     # g.op(...).setType(input.type().with_sizes(output_shape))
+    # print("[grid_sampler] input graph: {}".format(g))
+    input_shape = input.type().sizes()
+    grid_shape = grid.type().sizes()
+    input_strides = input.type().strides()
+    grid_strides = grid.type().strides()
+    print("[grid_sampler] input_strides: {}, grid_strides: {}".format(input_strides, grid_strides))
+    print("[grid_sampler] input_shape: {}, grid_shape: {}".format(input_shape, grid_shape))
+    
+    if input_shape!=None and grid_shape!=None:
+        output_shape = input_shape[:2] + grid_shape[1:3]
+        print("[grid_sampler] input_shape -> output_shape: {}".format(output_shape))
+    elif input_strides!=None and grid_strides!=None: 
+        C = int(input_strides[0]/input_strides[1])
+        W_out = int(grid_strides[1]/grid_strides[2])
+        H_out = int(grid_strides[0]/grid_strides[1])
+        output_shape = [1, C, H_out, W_out]
+        print("[grid_sampler] input_strides -> output_shape: {}".format(output_shape))
+    else:
+        output_shape = [1, 1, 1, 1]
+        print("[grid_sampler] nowhere -> output_shape: {}".format(output_shape))
 
-    return g.op("com.microsoft::GridSample", input, grid,
+    return g.op("custom_domain::GridSample", input, grid,
                 mode_s=mode_str,
                 padding_mode_s=padding_mode_str,
                 align_corners_i=align_corners).setType(input.type().with_sizes(output_shape))

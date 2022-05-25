@@ -257,5 +257,5 @@ def warp_perspective(
     #     return _fill_and_warp(src, grid, align_corners=align_corners, mode=mode, fill_value=fill_value)
 
     # return fake_grid_sample(src, grid)
-    # return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')
-    return custom_grid_sample(src, grid)
+    return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')
+    # return custom_grid_sample(src, grid)
