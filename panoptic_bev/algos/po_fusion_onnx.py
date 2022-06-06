@@ -195,15 +195,12 @@ class Pofusion_ONNX(torch.nn.Module):
     def forward(self, sem_logits:torch.Tensor, roi_msk_logits:torch.Tensor, bbx:torch.Tensor, cls:torch.Tensor):
         # During inference, cls has instance classes starting from 0, i.e, from [0, num_thing)
         # Get the roi mask containing the GT
-        msk_logits = []
+        msk_logits = torch.empty([1, 0, 28, 28], dtype=torch.float, device=sem_logits.device)
         for roi_msk_logits_i, cls_i in zip(roi_msk_logits, cls):
-            if roi_msk_logits_i is None:
-                msk_logits.append(None)
-            else:
+            if len(roi_msk_logits_i) > 0:
                 msk_logits_i = torch.cat([roi_msk_logits_i[idx, cls_i[idx], :, :].unsqueeze(0) for idx in range(roi_msk_logits_i.shape[0])], dim=0)
-                msk_logits.append(msk_logits_i)
+                msk_logits = torch.cat((msk_logits, msk_logits_i.unsqueeze(0)), dim=1)
 
-        msk_logits = torch.stack(msk_logits, dim=0)
         po_logits_stuff, po_logits_inst = po_process_semantic_logits(sem_logits, bbx, cls)
         po_logits_mask = po_process_mask_logits(sem_logits, msk_logits, bbx, cls, self.img_size)
 

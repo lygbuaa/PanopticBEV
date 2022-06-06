@@ -176,7 +176,7 @@ class PanopticBevNetTs(nn.Module):
             # torch.jit.save(body_ts, self.body_jit_path)
             # sys.exit(0)
 
-            # torch.onnx.export(self.body, image, self.body_onnx_path, opset_version=13, verbose=True)
+            # torch.onnx.export(self.body, image, self.body_onnx_path, opset_version=13, verbose=True, do_constant_folding=True)
             # sys.exit(0)
 
             # Transform from the front view to the BEV and upsample the height dimension
@@ -188,8 +188,8 @@ class PanopticBevNetTs(nn.Module):
             # torch.jit.save(transformer_ts, self.transformer_jit_path)
             # sys.exit(0)
 
-            torch.onnx.export(self.transformer, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=False, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
-            sys.exit(0)
+            # torch.onnx.export(self.transformer, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=False, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
+            # sys.exit(0)
 
 
             # if ms_bev == None:
@@ -224,9 +224,9 @@ class PanopticBevNetTs(nn.Module):
         else:
             bbx_pred, cls_pred, obj_pred, roi_msk_logits = self.inst_algo(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals)
 
-            #roi_algo_jit = torch.jit.script(self.inst_algo)
-            # torch.jit.save(roi_algo_jit, self.roi_algo_jit_path)
-            #torch.onnx.export(
+            roi_algo_jit = torch.jit.script(self.inst_algo)
+            torch.jit.save(roi_algo_jit, self.roi_algo_jit_path)
+            # torch.onnx.export(
             #    model=roi_algo_jit, 
             #    args=(ms_bev[0], ms_bev[1], ms_bev[2], ms_bev[3], proposals),
             #    f=self.roi_algo_onnx_path,
@@ -244,7 +244,7 @@ class PanopticBevNetTs(nn.Module):
             #            "roi_msk_logits": [1],
             #        },
             #    opset_version=13, verbose=True, do_constant_folding=True)
-            #sys.exit(0)
+            sys.exit(0)
 
         # Segmentation Part
         if g_toggle_semantic_jit:
@@ -284,7 +284,8 @@ class PanopticBevNetTs(nn.Module):
             po_pred_seamless, po_cls, po_iscrowd = self.po_fusion(sem_logits, roi_msk_logits, bbx_pred, cls_pred)
 
             # po_fusion_jit = torch.jit.script(self.po_fusion)
-            # # logger.debug("po_fusion_jit: {}".format(po_fusion_jit.graph))
+            # torch.jit.save(po_fusion_jit, self.po_fusion_jit_path)
+            # logger.debug("po_fusion_jit: {}".format(po_fusion_jit.graph))
             # torch.onnx.export(
             #     model=po_fusion_jit, 
             #     args=(sem_logits, roi_msk_logits, bbx_pred, cls_pred), 

@@ -12,6 +12,7 @@ from inplace_abn import ABN
 # import torch_tensorrt
 
 from panoptic_bev.config import load_config
+from panoptic_bev.custom.custom_grid_sample import custom_grid_sample
 
 from panoptic_bev.data.dataset import BEVKitti360Dataset, BEVTransform, BEVNuScenesDataset
 from panoptic_bev.data.misc import iss_collate_fn
@@ -485,7 +486,8 @@ def test(model, dataloader, **varargs):
     global g_bev_visualizer
 
     if g_run_model_jit:
-        model_jit = torch.jit.load("../jit/panoptic_bev_gpu.pt")
+        model_jit = torch.jit.load("../jit/panoptic_bev_gpu_list_768.pt")
+        model_jit.eval()
     else:
         fuser = FuseConvBn()
         fuser.do_bn_fusion_v2(model, bn_name="SyncBatchNorm")
@@ -565,11 +567,19 @@ def test(model, dataloader, **varargs):
                 results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
             # break
 
-            # model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=False)
+            model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=True)
             # frozen_model = torch.jit.optimize_for_inference(model_ts)
             # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_list_768.pt")
             # logger.info("torchscript model saved to ../jit/panoptic_bev_gpu_list_768.pt")
             # return
+
+            torch.onnx.export(
+                model=model_ts, 
+                args=(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"]), 
+                f="../onnx/multi_view_perception_768.onnx", 
+                custom_opsets={"custom_domain": 1},
+                opset_version=13, verbose=True, do_constant_folding=False)
+            return
 
             ### save panoptic_bev_cpu.pt due to Perspective2OrthographicWarper.forward()
             # device=torch.device('cpu')
