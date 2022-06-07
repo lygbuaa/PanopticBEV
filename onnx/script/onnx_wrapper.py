@@ -10,7 +10,7 @@ import onnx
 import onnxruntime as ort
 import onnxsim
 from panoptic_bev.utils import plogging
-plogging.init("./", "onnx_wrapper")
+# plogging.init("./", "onnx_wrapper")
 logger = plogging.get_logger()
 
 class OnnxWrapper(object):
