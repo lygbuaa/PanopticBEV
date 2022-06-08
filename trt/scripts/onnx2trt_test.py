@@ -7,7 +7,9 @@ import onnx
 import onnxsim
 import onnx_graphsurgeon as gs
 import tensorrt as trt
-from common import allocate_buffers, do_inference_v2
+from utils.common import allocate_buffers, do_inference_v2
+from utils.efficientdet_build_engine import EngineCalibrator
+from utils.image_batcher import ImageBatcher
 from panoptic_bev.utils import plogging
 plogging.init("./", "onnx2trt_test")
 logger = plogging.get_logger()
@@ -18,6 +20,7 @@ class Onnx2TRT(object):
         :param verbose: If enabled, a higher verbosity level will be set on the TensorRT logger.
         :param workspace: Max memory workspace to allow, in Gb.
         """
+        logger.info("TensorRT version: {}".format(trt.__version__))
         self.trt_logger = trt.Logger(trt.Logger.INFO)
         if verbose:
             self.trt_logger.min_severity = trt.Logger.Severity.VERBOSE
@@ -30,6 +33,15 @@ class Onnx2TRT(object):
 
         self.network = None
         self.parser = None
+
+    def __del__(self):
+        print("Onnx2TRT __del__")
+
+    def destruct(self):
+        if self.context:
+            del self.context
+        if self.engine:
+            del self.engine
 
     def print_version(self):
         # print("torch: {}".format(torch.__version__))
@@ -77,12 +89,39 @@ class Onnx2TRT(object):
             logger.info("Output '{}' with shape {} and dtype {}".format(output.name, output.shape, output.dtype))
         assert self.batch_size > 0
         self.builder.max_batch_size = self.batch_size
+        logger.info("builder support fp16: {}, int8: {}".format(self.builder.platform_has_fast_fp16, self.builder.platform_has_fast_int8))
+
+    def make_calibrator(self, calib_input=None, calib_cache="./calib.cache", calib_num_images=5000, calib_batch_size=8):
+        inputs = [self.network.get_input(i) for i in range(self.network.num_inputs)]
+        self.config.int8_calibrator = EngineCalibrator(calib_cache)
+        if calib_cache is None or not os.path.exists(calib_cache):
+            calib_shape = [calib_batch_size] + list(inputs[0].shape[1:])
+            calib_dtype = trt.nptype(inputs[0].dtype)
+            self.config.int8_calibrator.set_image_batcher(
+                ImageBatcher(calib_input, calib_shape, calib_dtype, max_num_images=calib_num_images,
+                            exact_batches=True, shuffle_files=True))
 
     def create_engine(self, engine_path, precision="fp16"):
-        self.builder.max_batch_size = 1 # always 1 for explicit batch
         self.config = self.builder.create_builder_config()
-        # need to be set along with fp16_mode if config is specified.
-        self.config.set_flag(trt.BuilderFlag.FP16)
+        if precision == "fp16":
+            if not self.builder.platform_has_fast_fp16:
+                logger.warning("FP16 is not supported natively on this platform/device")
+                return None
+            else:
+                self.config.set_flag(trt.BuilderFlag.FP16)
+        elif precision == "int8":
+            if not self.builder.platform_has_fast_int8:
+                logger.warning("INT8 is not supported natively on this platform/device")
+                return None
+            else:
+                if self.builder.platform_has_fast_fp16:
+                    # Also enable fp16, as some layers may be even more efficient in fp16 than int8
+                    self.config.set_flag(trt.BuilderFlag.FP16)
+                else:
+                    self.config.set_flag(trt.BuilderFlag.INT8)
+                    # using nuscenes-mini images for calibration
+                    self.make_calibrator(calib_input="/home/hugoliu/github/dataset/nuscenes/mini/samples/CAM_FRONT")
+
         self.config.max_workspace_size = 1<<30 #1GB
         # profile = self.builder.create_optimization_profile()
         # profile.set_shape('input', (1, 1, 4, 4), (2, 1, 4, 4), (4, 1, 4, 4))
@@ -102,6 +141,11 @@ class Onnx2TRT(object):
     def load_engine(self, engine_path):
         with open(engine_path, "rb") as f, trt.Runtime(self.trt_logger) as runtime:
             self.engine = runtime.deserialize_cuda_engine(f.read())
+        logger.info("engine loaded, name: {}".format(self.engine.name))
+        # inspector only avaliable since TRT-8.4
+        # inspector = self.engine.create_engine_inspector()
+        # inspector.execution_context = self.context
+        # logger.info(inspector.get_engine_information(trt.LayerInformationFormat.JSON))
         return self.engine
 
     def run_engine(self, inputs_np):
@@ -134,7 +178,7 @@ class Onnx2TRT(object):
                 logger.debug('Iteration %d/%d, ave batch time %.2f ms'%(i, nruns, np.mean(timings)*1000))
         logger.debug('Average batch time: %.2f ms'%(np.mean(timings)*1000))
 
-    def test_encoder(self, model_path, trt_path):
+    def test_encoder(self, model_path, trt_path, only_build_engine=False):
         model = onnx.load(model_path)
         try:
             onnx.checker.check_model(model)
@@ -143,23 +187,28 @@ class Onnx2TRT(object):
         except Exception as e:
             logger.error("onnx check model error: {}".format(e))
             return False
-        # self.create_network(onnx_path=model_path)
-        # self.create_engine(engine_path=trt_path)
-        image = np.random.rand(1, 3, 448, 768).astype(np.float16)
-        self.load_engine(trt_path)
-        # results = self.run_engine([image])
-        # for feat in results:
-        #     logger.info("{} output: {}".format(trt_path, feat.shape))
-        self.benchmark(trt_path, [image])
-        # delete context & engine to avoid segment fault in the end
-        del self.context
-        del self.engine
+        if only_build_engine:
+            self.create_network(onnx_path=model_path)
+            self.create_engine(engine_path=trt_path, precision="int8")
+            self.save_engine(engine_path=trt_path)
+            self.destruct
+            return True
+        else:
+            image = np.random.rand(1, 3, 448, 768).astype(np.float32)
+            self.load_engine(trt_path)
+            results = self.run_engine([image])
+            # for feat in results:
+            #     logger.info("{} output: {}".format(trt_path, feat.shape))
+            # self.benchmark(trt_path, [image])
+            # delete context & engine to avoid segment fault in the end
+            self.destruct()
+            return True
 
 if __name__ == "__main__":
     resnet50_path = "../resnet50-v1-12/resnet50-v1-12.onnx"
     #run "polygraphy surgeon sanitize model.onnx --fold-constants --output model_folded.onnx" first
     encoder_onnx_path = "../../onnx/body_encoder_folded.onnx"
-    encoder_trt_path = "../body_encoder.trt"
-    onnxtrt = Onnx2TRT()
+    encoder_trt_path = "../body_encoder_int8.trt"
+    onnxtrt = Onnx2TRT(verbose=True)
     # onnxtrt.simplify_onnx_model(encoder_path)
     onnxtrt.test_encoder(encoder_onnx_path, encoder_trt_path)
