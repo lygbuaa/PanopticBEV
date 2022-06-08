@@ -152,7 +152,8 @@ class Onnx2TRT(object):
         assert self.engine
         self.context = self.engine.create_execution_context()
         inputs, outputs, bindings, stream = allocate_buffers(self.engine)
-        inputs[0].host = inputs_np[0]
+        for idx in range(len(inputs)):
+            inputs[idx].host = inputs_np[idx]
         trt_outputs = do_inference_v2(self.context, bindings=bindings, inputs=inputs, outputs=outputs, stream=stream)
         return trt_outputs
 
@@ -178,6 +179,17 @@ class Onnx2TRT(object):
                 logger.debug('Iteration %d/%d, ave batch time %.2f ms'%(i, nruns, np.mean(timings)*1000))
         logger.debug('Average batch time: %.2f ms'%(np.mean(timings)*1000))
 
+    '''
+        Name: Unnamed Network 0 | Explicit Batch Engine (498 layers)
+        ---- 1 Engine Input(s) ----
+        {x.1 [dtype=float32, shape=(1, 3, 448, 768)]}
+        ---- 5 Engine Output(s) ----
+        {17831 [dtype=float32, shape=(1, 160, 112, 192)],
+        18048 [dtype=float32, shape=(1, 160, 56, 96)],
+        18265 [dtype=float32, shape=(1, 160, 28, 48)],
+        18482 [dtype=float32, shape=(1, 160, 14, 24)],
+        18695 [dtype=float32, shape=(1, 160, 7, 12)]}
+    '''
     def test_encoder(self, model_path, trt_path, only_build_engine=False):
         model = onnx.load(model_path)
         try:
@@ -189,9 +201,9 @@ class Onnx2TRT(object):
             return False
         if only_build_engine:
             self.create_network(onnx_path=model_path)
-            self.create_engine(engine_path=trt_path, precision="int8")
+            self.create_engine(engine_path=trt_path, precision="fp16")
             self.save_engine(engine_path=trt_path)
-            self.destruct
+            self.destruct()
             return True
         else:
             image = np.random.rand(1, 3, 448, 768).astype(np.float32)
@@ -204,11 +216,55 @@ class Onnx2TRT(object):
             self.destruct()
             return True
 
+    '''
+        Name: Unnamed Network 0 | Explicit Batch Engine (100 layers)
+        ---- 4 Engine Input(s) ----
+        {input.117 [dtype=float32, shape=(1, 256, 224, 384)],
+        input.101 [dtype=float32, shape=(1, 256, 112, 192)],
+        input.43 [dtype=float32, shape=(1, 256, 56, 96)],
+        input.1 [dtype=float32, shape=(1, 256, 28, 48)]}
+        ---- 2 Engine Output(s) ----
+        {357 [dtype=float32, shape=(1, 10, 896, 1536)],
+        363 [dtype=int32, shape=(896, 1536)]}
+    '''
+    def test_sem_head(self, model_path, trt_path, only_build_engine=False):
+        model = onnx.load(model_path)
+        try:
+            onnx.checker.check_model(model)
+            # logger.info(onnx.helper.printable_graph(model.graph))
+            # logger.info('onnx model graph is:\n{}'.format(model.graph))
+        except Exception as e:
+            logger.error("onnx check model error: {}".format(e))
+            return False
+        if only_build_engine:
+            self.create_network(onnx_path=model_path)
+            self.create_engine(engine_path=trt_path, precision="fp16")
+            self.save_engine(engine_path=trt_path)
+            self.destruct()
+            return True
+        else:
+            ms_bev_0 = np.random.rand(1, 256, 224, 384).astype(np.float32)
+            ms_bev_1 = np.random.rand(1, 256, 112, 192).astype(np.float32)
+            ms_bev_2 = np.random.rand(1, 256, 56, 96).astype(np.float32)
+            ms_bev_3 = np.random.rand(1, 256, 28, 48).astype(np.float32)
+            self.load_engine(trt_path)
+            # results = self.run_engine([ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
+            # for feat in results:
+            #     logger.info("{} output: {}".format(trt_path, feat.shape))
+            self.benchmark(trt_path, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
+            # delete context & engine to avoid segment fault in the end
+            self.destruct()
+            return True
+
 if __name__ == "__main__":
     resnet50_path = "../resnet50-v1-12/resnet50-v1-12.onnx"
     #run "polygraphy surgeon sanitize model.onnx --fold-constants --output model_folded.onnx" first
     encoder_onnx_path = "../../onnx/body_encoder_folded.onnx"
     encoder_trt_path = "../body_encoder_int8.trt"
+
+    sem_head_onnx_path = "../../onnx/sem_algo_fold.onnx"
+    sem_head_trt_path = "../sem_algo_fp16.trt"
+
     onnxtrt = Onnx2TRT(verbose=True)
-    # onnxtrt.simplify_onnx_model(encoder_path)
-    onnxtrt.test_encoder(encoder_onnx_path, encoder_trt_path)
+    # onnxtrt.test_encoder(encoder_onnx_path, encoder_trt_path)
+    onnxtrt.test_sem_head(sem_head_onnx_path, sem_head_trt_path)
