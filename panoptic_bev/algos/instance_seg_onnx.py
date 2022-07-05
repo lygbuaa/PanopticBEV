@@ -263,10 +263,11 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
             rois = torch.cat([rois, rois], dim=0)
 
         cls_logits, bbx_logits = self.head_bbx(rois)
+        # cls_logits, bbx_logits = self.head.forward_bbx(rois)
         # cls_logits, bbx_logits = fake_head_roi_bbx(rois)
         # cls_logits, bbx_logits, _ = self.head(rois, True, False)
-        # head_bbx_jit = torch.jit.script(self.head)
-        # torch.jit.save(head_bbx_jit, "../jit/roi_head_bbx_ts.pt")
+        # head_bbx_jit = torch.jit.trace(self.head, (rois), check_trace=True)
+        # torch.jit.save(head_bbx_jit, "../jit/roi_head_bbx.pt")
         # sys.exit(0)
 
         if prune:
@@ -301,8 +302,13 @@ class InstanceSegAlgoFPN_ONNX(torch.nn.Module):
             rois = torch.cat([rois, rois], dim=0)
 
         msk_logits = self.head_msk(rois)
+        # msk_logits = self.head.forward_msk(rois)
         # msk_logits = fake_head_roi_msk(rois)
         # _, _, msk_logits = self.head(rois, False, True)
+        # head_msk_jit = torch.jit.trace(self.head, (rois), check_trace=True)
+        # torch.jit.save(head_msk_jit, "../jit/roi_head_msk.pt")
+        # sys.exit(0)
+
         if prune:
             msk_logits = msk_logits[0, ...].unsqueeze(0)
         return msk_logits

@@ -25,7 +25,7 @@ class ValidMask(object):
         # suppose we have fov center straight towards right
         scale_l = math.tan(self.FOV_L*math.pi/180.0)
         scale_r = math.tan(self.FOV_R*math.pi/180.0)
-        self.MSK = np.ones((self.BEV_H, self.BEV_W), dtype=np.uint8)
+        self.MSK = np.ones((self.BEV_H, self.BEV_W), dtype=np.float32) #np.float32 or np.uint8
         ori_x = 0.0
         ori_y = self.BEV_H / 2.0
         for y in range(self.BEV_H):

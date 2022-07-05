@@ -567,19 +567,19 @@ def test(model, dataloader, **varargs):
                 results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
             # break
 
-            model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=True)
+            # model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=True)
             # frozen_model = torch.jit.optimize_for_inference(model_ts)
             # torch.jit.save(frozen_model, "../jit/panoptic_bev_gpu_list_768.pt")
             # logger.info("torchscript model saved to ../jit/panoptic_bev_gpu_list_768.pt")
             # return
 
-            torch.onnx.export(
-                model=model_ts, 
-                args=(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"]), 
-                f="../onnx/multi_view_perception_768.onnx", 
-                custom_opsets={"custom_domain": 1},
-                opset_version=13, verbose=True, do_constant_folding=False)
-            return
+            # torch.onnx.export(
+            #     model=model_ts, 
+            #     args=(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"]), 
+            #     f="../onnx/multi_view_perception_768.onnx", 
+            #     custom_opsets={"custom_domain": 1},
+            #     opset_version=13, verbose=True, do_constant_folding=False)
+            # return
 
             ### save panoptic_bev_cpu.pt due to Perspective2OrthographicWarper.forward()
             # device=torch.device('cpu')
