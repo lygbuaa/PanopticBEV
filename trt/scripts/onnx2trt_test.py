@@ -4,6 +4,7 @@
 import os, sys, time
 import numpy as np
 import onnx
+from onnx import helper, shape_inference
 import onnxsim
 import onnx_graphsurgeon as gs
 import tensorrt as trt
@@ -26,6 +27,9 @@ class Onnx2TRT(object):
             self.trt_logger.min_severity = trt.Logger.Severity.VERBOSE
 
         trt.init_libnvinfer_plugins(self.trt_logger, namespace="")
+        PLUGIN_CREATORS = trt.get_plugin_registry().plugin_creator_list
+        for plugin_creator in PLUGIN_CREATORS:
+            logger.info("find plugin_creator: {}".format(plugin_creator.name))
 
         self.builder = trt.Builder(self.trt_logger)
         self.config = self.builder.create_builder_config()
@@ -49,6 +53,91 @@ class Onnx2TRT(object):
         # print("torch: {}".format(torch.__version__))
         logger.info("onnx version: {}".format(onnx.__version__))
         logger.info("trt version: {}".format(trt.__version__))
+
+    def onnx_shape_infer(self, onnx_model_file):
+        model = onnx.load(onnx_model_file)
+        try:
+            onnx.checker.check_model(model)
+            # logger.info(onnx.helper.printable_graph(model.graph))
+            logger.info('onnx model graph is:\n{}'.format(model))
+        except Exception as e:
+            logger.error("onnx check model error: {}".format(e))
+
+        return
+        model.opset_import[0].version = 16
+        counter = 0
+        for node in model.graph.node:
+            # logger.info("pick graph node: {}".format(node))
+            if node.op_type == 'GridSample':
+                counter += 1
+                logger.info("[{}] find GridSmple: {}".format(counter, node.name))
+                node.ClearField("domain")
+        logger.info("totally {} GridSample infered".format(counter))
+        inferred_model = shape_inference.infer_shapes(model)
+
+        counter = 0
+        for node in inferred_model.graph.node:
+            # logger.info("pick graph node: {}".format(node))
+            if node.op_type == 'GridSample':
+                counter += 1
+                logger.info("[{}] find GridSmple: {}".format(counter, node.name))
+                for input_name in node.input:
+                    for value_info in inferred_model.graph.value_info:
+                        if value_info.name == input_name:
+                            logger.info("[{}] GridSmple input_{}: {}".format(counter, input_name, value_info))
+                for output_name in node.output:
+                    for value_info in inferred_model.graph.value_info:
+                        if value_info.name == output_name:
+                            logger.info("[{}] GridSmple output_{}: {}".format(counter, output_name, value_info))
+
+        new_path = onnx_model_file + ".inferred"
+        onnx.save(inferred_model, new_path)
+        # model = onnx.load(new_path)
+        # try:
+        #     onnx.checker.check_model(model)
+        #     # logger.info(onnx.helper.printable_graph(model.graph))
+        #     # logger.info('onnx model graph is:\n{}'.format(model))
+        # except Exception as e:
+        #     logger.error("onnx check model error: {}".format(e))
+
+    def modify_onnx(self, onnx_model_file):
+        graph = gs.import_onnx(onnx.load(onnx_model_file))
+        assert(graph is not None)
+        counter = 0
+        for node in graph.nodes:
+            # logger.info("pick graph node: {}".format(node))
+            if node.op == 'GridSample':
+                counter += 1
+                logger.info("[{}] find GridSmple: {}".format(counter, node))
+                _, c, h, w = node.inputs[0].shape
+                _, h_g, w_g, _ = node.inputs[1].shape
+                align_corners = node.attrs['align_corners']
+                inter_mode = node.attrs['mode']
+                pad_mode = node.attrs['padding_mode']
+
+                if inter_mode == "bilinear":
+                    inter_mode_enum = 0
+                elif inter_mode == "nearest":
+                    inter_mode_enum = 1
+                else:  # inter_mode == 'bicubic'
+                    inter_mode_enum = 2
+
+                if pad_mode == "zeros":
+                    padding_mode_enum = 0
+                elif pad_mode == "border":
+                    padding_mode_enum = 1
+                else:  # pad_mode == 'reflection'
+                    padding_mode_enum = 2
+
+                m_type = 0 if node.inputs[0].dtype == np.float32 else 1
+                buffer = np.array([c, h, w, h_g, w_g], dtype=np.int64).tobytes('C') \
+                + np.array([inter_mode_enum, padding_mode_enum], dtype=np.int32).tobytes('C') \
+                + np.array([align_corners], dtype=np.bool).tobytes('C') \
+                + np.array([m_type], dtype=np.int32).tobytes('C')
+                node.attrs = {'name':'GridSampler', 'version':'1', 'namespace':"", 'data':buffer}
+                node.op = 'TRT_PluginV2'
+        new_path = onnx_model_file + ".modified"
+        onnx.save(gs.export_onnx(graph), new_path)
 
     def simplify_onnx_model(self, model_path):
         model = onnx.load(model_path)
@@ -396,10 +485,11 @@ if __name__ == "__main__":
     encoder_trt_path = "../body_encoder_int8.trt"
 
     transformer_onnx_path = "../../onnx/transformer_op13.onnx"
-    transformer_trt_path = "../../onnx/transformer_fp16.trt"
+    transformer_onnx_inferred_path = "../../onnx/transformer_op13.onnx.inferred"
+    transformer_trt_path = "../transformer_fp16.trt"
 
     roi_onnx_path = "../../onnx/roi_algo_op13.onnx"
-    roi_trt_path = "../../onnx/roi_algo_fp16.trt"
+    roi_trt_path = "../roi_algo_fp16.trt"
 
     sem_head_onnx_path = "../../onnx/sem_algo_fold.onnx"
     sem_head_trt_path = "../sem_algo_fp16.trt"
@@ -411,14 +501,16 @@ if __name__ == "__main__":
     po_fusion_onnx_path = "../../onnx/po_fusion_op13.onnx"
     po_fusion_trt_path = "../po_fusion_fp16.trt"
 
-    demo_onnx_path = "./demo/trt_demo.onnx"
-    demo_trt_path = "./demo/trt_demo_fp16.trt"
+    demo_onnx_path = "../custom_grid_sample.onnx"
+    demo_trt_path = "../trt_custom_grid_sample.trt"
 
     onnxtrt = Onnx2TRT(verbose=True)
     # onnxtrt.test_encoder(encoder_onnx_path, encoder_trt_path)
     # onnxtrt.test_sem_head(sem_head_onnx_path, sem_head_trt_path, only_build_engine=False)
     # onnxtrt.test_rpn_neck(rpn_neck_onnx_path, rpn_neck_trt_path)
     # onnxtrt.test_po_fusion(po_fusion_onnx_path, po_fusion_trt_path)
-    onnxtrt.test_demo(demo_onnx_path, demo_trt_path, only_build_engine=False)
+    # onnxtrt.test_demo(demo_onnx_path, demo_trt_path, only_build_engine=False).
     # onnxtrt.test_transformer(transformer_onnx_path, transformer_trt_path)
-    # onnxtrt.test_roi_head(roi_onnx_path, roi_trt_path)
+    onnxtrt.onnx_shape_infer(transformer_onnx_path)
+    # onnxtrt.modify_onnx(transformer_onnx_inferred_path)
+

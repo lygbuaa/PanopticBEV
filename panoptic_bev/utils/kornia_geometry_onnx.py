@@ -21,6 +21,7 @@ def _torch_inverse_cast(input: torch.Tensor) -> torch.Tensor:
     # dtype: torch.dtype = input.dtype
     # if dtype not in (torch.float32, torch.float64):
     dtype = torch.float32
+    # print("custom_inverse, _torch_inverse_cast: {}".format(input.shape))
     return custom_inverse(input.to(dtype)).to(input.dtype)
 
 @torch.jit.script
@@ -210,7 +211,8 @@ def transform_points(trans_01: torch.Tensor, points_1: torch.Tensor) -> torch.Te
         >>> points_0 = transform_points(trans_01, points_1)  # BxNx3
     """
     # We reshape to BxNxD in case we get more dimensions, e.g., MxBxNxD
-    shape_inp = list(points_1.shape)
+    # shape_inp = list(points_1.shape), to avoid Sequence ops.
+    shape_inp = points_1.shape
     points_1 = points_1.reshape(-1, points_1.shape[-2], points_1.shape[-1])
     trans_01 = trans_01.reshape(-1, trans_01.shape[-2], trans_01.shape[-1])
     # We expand trans_01 to match the dimensions needed for bmm
@@ -225,9 +227,12 @@ def transform_points(trans_01: torch.Tensor, points_1: torch.Tensor) -> torch.Te
     points_0_h = torch.squeeze(points_0_h, dim=-1)
     # to euclidean
     points_0 = convert_points_from_homogeneous(points_0_h)  # BxNxD
-    # reshape to the input shape
-    shape_inp[-2] = points_0.shape[-2]
-    shape_inp[-1] = points_0.shape[-1]
+    # print("transform_points: shape_inp: {}, points_0: {}".format(shape_inp, points_0.shape))
+    # reshape to the input shape, keep shape_inp unchanged, to avoid squence ops, anyway shape_inp is unchanged at all!
+    assert shape_inp[-2] == points_0.shape[-2]
+    assert shape_inp[-1] == points_0.shape[-1]
+    # shape_inp[-2] = points_0.shape[-2]
+    # shape_inp[-1] = points_0.shape[-1]
     points_0 = points_0.reshape(shape_inp)
     return points_0
 

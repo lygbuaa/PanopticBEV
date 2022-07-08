@@ -179,6 +179,7 @@ class FlatTransformer(nn.Module):
         # Convert the incorrect mask back into the FV and use it to get the erroneous features in the FV
         # ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
         ipm_incorrect = custom_rot90(ipm_incorrect, k=2, dims=[2, 3])
+        # print("custom_inverse, theta_ipm: {}".format(theta_ipm.shape))
         theta_ipm_inv = custom_inverse(theta_ipm)
 
         ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=theta_ipm_inv, dsize=torch.tensor([feat.shape[2], feat.shape[3]]))

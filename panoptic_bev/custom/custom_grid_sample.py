@@ -11,7 +11,6 @@ except ModuleNotFoundError:
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_registry as sym_registry
 import torch
-from panoptic_bev.custom.custom_rot90 import custom_rot90
 
 _OPSET_VERSION = 1
 _registered_ops: typing.AbstractSet[str] = set()
@@ -19,7 +18,7 @@ _registered_ops: typing.AbstractSet[str] = set()
 def _reg(symbolic_fn: typing.Callable):
     name = "::%s" % symbolic_fn.__name__
     register_custom_op_symbolic(name, symbolic_fn, _OPSET_VERSION)
-    print("register_custom_op_symbolic, name: {}, symbolic_fn: {}, _OPSET_VERSION".format(name, symbolic_fn, _OPSET_VERSION))
+    print("register_custom_op_symbolic, name: {}, symbolic_fn: {}, _OPSET_VERSION: {}".format(name, symbolic_fn, _OPSET_VERSION))
     _registered_ops.add(name)
 
 def grid_sampler(g:torch._C.Graph, input:torch._C.Value, grid:torch._C.Value, mode:int, padding_mode:int, align_corners:bool):
@@ -70,9 +69,9 @@ _reg(grid_sampler)
 
 @torch.jit.script
 def custom_grid_sample(input:torch.Tensor, grid:torch.Tensor):
+    input = torch.clamp(input, min=0.0, max=1.0)
     x = torch.nn.functional.grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
     ### RuntimeError: Unsupported: ONNX export of transpose for tensor of unknown rank.
-    # return custom_rot90(x, k=2, dims=[2, 3])
     return x
 
 def test():

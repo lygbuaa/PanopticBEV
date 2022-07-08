@@ -88,8 +88,10 @@ def compute_extrinsic_matrix(translation, rotation):
 @torch.jit.script
 def compute_homography(intrinsic_matrix, extrinsic_matrix, M):
     P = torch.matmul(intrinsic_matrix, extrinsic_matrix)
-    H = custom_inverse(P @ M)
-    return H
+    input = (P @ M).unsqueeze(0)
+    # print("custom_inverse, compute_homography: {}".format(input.shape))
+    H = custom_inverse(input)
+    return H.squeeze(0)
 
 
 def get_init_homography(intrinsics, extrinsics, px_per_metre, img_scale, img_size):

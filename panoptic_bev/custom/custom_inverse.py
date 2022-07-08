@@ -40,23 +40,29 @@ def custom_inverse_dim2(input:torch.Tensor):
 
 @torch.jit.script
 def custom_inverse(input:torch.Tensor) -> torch.Tensor:
+    # to avoid Sequence ops, only support dim=3 && C=1
     dims = input.dim()
-    assert dims <= 3, "invalid tensor dim: {}!".format(dims)
-    # print("custom_inverse, input: {}".format(input.shape))
+    assert dims == 3
+    C, H, W = input.shape
+    assert C == 1 and H == W
+    # print("custom_inverse: input: {}".format(input.shape))
+    output = custom_inverse_dim2(input[0])
+    return output.unsqueeze(0)
+    # assert dims <= 3, "invalid tensor dim: {}!".format(dims)
 
-    if dims == 1:
-        return 1.0/input
-    elif dims == 2:
-        return custom_inverse_dim2(input)
-    elif dims == 3:
-        inv_list = []
-        for A in input:
-            inv_A = custom_inverse_dim2(A)
-            inv_list.append(inv_A)
-        return torch.stack(inv_list, dim=0)
-    else:
-        # just return a tensor with the same dim
-        return input
+    # if dims == 1:
+    #     return 1.0/input
+    # elif dims == 2:
+    #     return custom_inverse_dim2(input)
+    # elif dims == 3:
+    #     inv_list = []
+    #     for A in input:
+    #         inv_A = custom_inverse_dim2(A)
+    #         inv_list.append(inv_A)
+    #     return torch.stack(inv_list, dim=0)
+    # else:
+    #     # just return a tensor with the same dim
+    #     return input
 
 def test():
     x = torch.rand(size=[2, 4, 4], dtype=torch.float)
