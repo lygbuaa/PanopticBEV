@@ -17,7 +17,7 @@ def cof1(M:torch.Tensor, index:List[int]):
     x = torch.cat((zx, yx), dim=1)
     sx = torch.cat((s, x), dim=0)
     # print("cof1, s: {}, x: {}, sx: {}".format(s.shape, x.shape, sx.shape))
-    return torch.linalg.det(sx)
+    return torch.linalg.det(sx.float())
  
 @torch.jit.script
 def alcof(M:torch.Tensor, index:List[int]):
@@ -35,7 +35,7 @@ def adj(M:torch.Tensor):
 def custom_inverse_dim2(input:torch.Tensor):
     assert input.dim()==2, "inverse only support dims=2 tensor!"
     assert input.size(0)==input.size(1), "inverse only support square matrix!"
-    output = 1.0 / torch.linalg.det(input) * adj(input)
+    output = 1.0 / torch.linalg.det(input.float()) * adj(input)
     return output
 
 @torch.jit.script

@@ -9,7 +9,7 @@ from typing import Tuple, List
 def linspace_from_neg_one(theta:torch.Tensor, num_steps:int):
     rr = torch.linspace(-1, 1, num_steps, dtype=theta.dtype, device=theta.device)
     rr = rr * (num_steps-1)/num_steps
-    return rr
+    return rr[0:num_steps]
 
 @torch.jit.script
 def custom_affine_grid(theta:torch.Tensor, feat:torch.Tensor, align_corners:bool=False):
@@ -19,7 +19,7 @@ def custom_affine_grid(theta:torch.Tensor, feat:torch.Tensor, align_corners:bool
     base_grid.select(-1, 0).copy_(linspace_from_neg_one(theta, W))
     base_grid.select(-1, 1).copy_(linspace_from_neg_one(theta, H).unsqueeze_(-1))
     base_grid.select(-1, 2).fill_(1)
-    
+
     grid = base_grid.view(N, H*W, 3).bmm(theta.transpose(1, 2))
     return grid.view(N, H, W, 2)
 

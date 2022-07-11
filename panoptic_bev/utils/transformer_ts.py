@@ -19,13 +19,17 @@ def compute_M(scale, image_size, px_per_metre):
                   torch.tensor([0.0, 0.0, 0.0], device=scale.device),  # This must be all zeros to cancel out the effect of Z
                   torch.tensor([0.0, 0.0, 1.0], device=scale.device)], dim=0)
 
-    return M
+    return M.double()
 
 @torch.jit.script
 def compute_intrinsic_matrix(fx, fy, px, py, img_scale):
-    K = torch.stack([torch.stack([fx * img_scale, torch.tensor(0.0, device=fx.device), px * img_scale]),
-                    torch.stack([torch.tensor(0.0, device=fx.device), fy * img_scale, py * img_scale]),
-                    torch.tensor([0.0, 0.0, 1.0], device=fx.device)], dim=0)
+    K = torch.stack([torch.stack([torch.tensor(fx * img_scale, device=fx.device, dtype=torch.double), torch.tensor(0.0, device=fx.device, dtype=torch.double), torch.tensor(px * img_scale, device=fx.device, dtype=torch.double)]),
+                    torch.stack([torch.tensor(0.0, device=fx.device, dtype=torch.double), torch.tensor(fy * img_scale, device=fx.device, dtype=torch.double), torch.tensor(py * img_scale, device=fx.device, dtype=torch.double)]),
+                    torch.tensor([0.0, 0.0, 1.0], device=fx.device, dtype=torch.double)], dim=0)
+
+    # K = torch.tensor([[fx * img_scale, 0.0, px * img_scale],
+    #                   [0.0, fy * img_scale, py * img_scale],
+    #                   [0.0, 0.0, 1.0]], device=fx.device, dtype=torch.double)
     return K
 
 @torch.jit.script
@@ -77,7 +81,7 @@ def compute_extrinsic_matrix(translation, rotation):
     # extrinsic = np.zeros((3, 4), dtype=np.float)
     # extrinsic[:3, :3] = R[:3, :3]
     # extrinsic[:, 3] = t_rot.squeeze(1)
-    extrinsic = torch.zeros((3, 4), dtype=torch.float)
+    extrinsic = torch.zeros((3, 4), dtype=torch.double)
     extrinsic[:3, :3] = R[:3, :3]
     extrinsic[:, 3] = t_rot
 
