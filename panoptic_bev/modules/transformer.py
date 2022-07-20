@@ -3,7 +3,7 @@ from torch.nn import functional as F
 import torch, math, sys
 # import kornia
 # from kornia.geometry.transform import warp_perspective
-from panoptic_bev.utils.kornia_geometry_onnx import warp_perspective
+from panoptic_bev.utils.kornia_geometry_onnx import warp_perspective_v2
 from inplace_abn import ABN
 from panoptic_bev.utils.fake_ops import fake_grid_sample, fake_rot90, fake_deg2rad, fake_affine_grid, fake_linalg_inv
 from panoptic_bev.custom.custom_rot90 import custom_rot90
@@ -18,7 +18,7 @@ logger = plogging.get_logger()
 g_onnx_fake_ops = False
 
 class VerticalTransformer(nn.Module):
-    def __init__(self, in_ch, v_2d_ch, v_3d_ch, img_size_in, img_size_out, extents, img_scale, resolution, norm_act=ABN):
+    def __init__(self, in_ch, v_2d_ch, v_3d_ch, img_size_in, img_size_out, extents, img_scale, resolution, norm_act=ABN, initializer_generator=None):
         super(VerticalTransformer, self).__init__()
 
         H_in = int(img_size_in[0] * img_scale)
@@ -54,8 +54,10 @@ class VerticalTransformer(nn.Module):
         self.depth_extender_dummy = nn.Conv3d(Z_out, Z_out, 1, padding=0, bias=False)
         self.depth_estimation_dummy = nn.Conv2d(Z_out, Z_out, 1, padding=0, bias=False)
 
-    def forward(self, v_feat, intrinsics, extrinsics=None):
-        
+        self.g_intrisics_list = initializer_generator.get_intrinsics_list()
+
+    def forward(self, v_feat, index=0, intrinsics=None, extrinsics=None):
+        intrinsics = self.g_intrisics_list[:, index].to(v_feat.device)
         # Generate the depth-based spatial occupancy map (attention map)
         v_depth_feat = self.depth_estimation_dummy(self.depth_estimation(v_feat))
         v_depth_feat = v_depth_feat.permute(0, 2, 1, 3).contiguous()
@@ -114,7 +116,7 @@ class ErrorCorrectionModule(nn.Module):
 
 class FlatTransformer(nn.Module):
     def __init__(self, in_ch, f_2d_ch, extrinsics=None, bev_params=None, in_img_size=None, out_img_size=None,
-                 img_scale=None, extents=None, resolution=None, norm_act=ABN):
+                 img_scale=None, extents=None, resolution=None, norm_act=ABN, initializer_generator=None):
         super(FlatTransformer, self).__init__()
         self.f_2d_ch = f_2d_ch
         self.img_scale = img_scale
@@ -153,15 +155,26 @@ class FlatTransformer(nn.Module):
 
         self.warper = Perspective2OrthographicWarper(extents, img_scale, resolution)
         self.px_per_metre = torch.abs((bev_params['f'] * torch.tensor(img_scale)) / (bev_params['cam_z']))
+        self.g_intrisics_list = initializer_generator.get_intrinsics_list()
+        self.g_theta_ipm_list, self.g_theta_ipm_inv_list = initializer_generator.generate_theta_ipm_list(
+            self.extrinsics, self.px_per_metre, torch.tensor(self.img_scale), self.out_img_size_reverse)
+        self.src_norm_trans_dst_norm_list, self.src_norm_trans_dst_norm_inv_list = initializer_generator.generate_src_norm_trans_dst_norm(
+            self.g_theta_ipm_list, self.g_theta_ipm_inv_list,
+            img_scale, in_img_size, (self.Z_out, self.W_out))
         # self.tmp_jit_path = "../jit/tmp_transformer.pt"
         # self.jit_tmp_transformer = torch.jit.load(self.tmp_jit_path)
 
-    def forward(self, feat, intrinsics, extrinsics=None):
+    def forward(self, feat, index=0, intrinsics=None, extrinsics=None):
+        intrinsics = self.g_intrisics_list[:, index].to(feat.device)
         feat = self.f_dummy(self.ch_mapper_in(feat))
         
-        theta_ipm = g_create_theta_ipm(intrinsics, self.extrinsics, self.px_per_metre, torch.tensor(self.img_scale), self.out_img_size_reverse, torch.tensor(feat.shape[0]))
+        # theta_ipm = g_create_theta_ipm(intrinsics, self.extrinsics, self.px_per_metre, torch.tensor(self.img_scale), self.out_img_size_reverse, torch.tensor(feat.shape[0]))
+        # theta_ipm = self.g_theta_ipm_list[index]
+        src_norm_trans_dst_norm = self.src_norm_trans_dst_norm_list[index].to(feat.device)
+
         # print("feat device: {}, theta_ipm device: {}".format(feat.device, theta_ipm.device))
-        feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
+        # feat_bev_ipm = warp_perspective(src=feat, M=theta_ipm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
+        feat_bev_ipm = warp_perspective_v2(src=feat, src_norm_trans_dst_norm=src_norm_trans_dst_norm, dsize=torch.tensor([int(self.Z_out), int(self.W_out)]))
         # torch.onnx.export(
         #     model=warp_perspective, 
         #     args=(feat, theta_ipm, torch.tensor([int(self.Z_out), int(self.W_out)])),
@@ -180,9 +193,12 @@ class FlatTransformer(nn.Module):
         # ipm_incorrect = torch.rot90(ipm_incorrect, k=2, dims=[2, 3])
         ipm_incorrect = custom_rot90(ipm_incorrect, k=2, dims=[2, 3])
         # print("custom_inverse, theta_ipm: {}".format(theta_ipm.shape))
-        theta_ipm_inv = custom_inverse(theta_ipm)
+        # theta_ipm_inv = custom_inverse(theta_ipm)
+        # theta_ipm_inv = self.g_theta_ipm_inv_list[index]
+        src_norm_trans_dst_norm_inv = self.src_norm_trans_dst_norm_inv_list[index].to(feat.device)
 
-        ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=theta_ipm_inv, dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
+        # ipm_incorrect_fv = warp_perspective(src=ipm_incorrect, M=theta_ipm_inv, dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
+        ipm_incorrect_fv = warp_perspective_v2(src=ipm_incorrect, src_norm_trans_dst_norm=src_norm_trans_dst_norm_inv, dsize=torch.tensor([feat.shape[2], feat.shape[3]]))
         # logger.debug("ipm_incorrect: {}, theta_ipm: {}, feat: {}, ipm_incorrect_fv: {}".format(ipm_incorrect.shape, theta_ipm.shape, feat.shape, ipm_incorrect_fv.shape))
         feat_ecm_fv = (feat * ipm_incorrect_fv)
 
@@ -284,7 +300,7 @@ class TransformerVF(nn.Module):
     BEV_RESOLUTION = 1.0
 
     def __init__(self, in_ch, tfm_ch, out_ch,  extrinsics=None, bev_params=None, H_in=None, W_in=None, Z_out=None,
-                 W_out=None, img_scale=None, norm_act=ABN):
+                 W_out=None, img_scale=None, norm_act=ABN, initializer_generator=None):
         super(TransformerVF, self).__init__()
         self.img_scale = img_scale
 
@@ -310,9 +326,9 @@ class TransformerVF(nn.Module):
 
         self.v_transform = VerticalTransformer(in_ch=tfm_ch, v_2d_ch=tfm_ch // 2, v_3d_ch=tfm_ch // 2, img_size_in=(H_in, W_in),
                                                img_size_out=(Z_out, W_out), extents=extents, img_scale=img_scale,
-                                               resolution=resolution, norm_act=norm_act)
+                                               resolution=resolution, norm_act=norm_act, initializer_generator=initializer_generator)
         self.f_transform = FlatTransformer(tfm_ch, tfm_ch, extrinsics, bev_params, (H_in, W_in), (W_out, Z_out),
-                                           img_scale, extents, resolution, norm_act)
+                                           img_scale, extents, resolution, norm_act, initializer_generator=initializer_generator)
 
         self.merge_feat_vf = MergeFeaturesVF(tfm_ch, norm_act=norm_act)
 
@@ -323,7 +339,7 @@ class TransformerVF(nn.Module):
         self.dummy = nn.Conv2d(out_ch, out_ch, 1, padding=0, bias=False)
 
 
-    def forward(self, feat, intrinsics, extrinsics=None, valid_msk=None):
+    def forward(self, feat, index, extrinsics=None, valid_msk=None):
         feat = self.ch_mapper_in(feat)
 
         # Compute the vertical-flat attention mask
@@ -340,8 +356,8 @@ class TransformerVF(nn.Module):
         del v_att, f_att
 
         # Perform the transformations on vertical and flat regions of the image plane feature map
-        feat_v, _ = self.v_transform(feat_v, intrinsics, extrinsics=None)
-        feat_f = self.f_transform(feat_f, intrinsics, extrinsics=None)
+        feat_v, _ = self.v_transform(feat_v, index, intrinsics=None, extrinsics=None)
+        feat_f = self.f_transform(feat_f, index, intrinsics=None, extrinsics=None)
 
         # Resize the feature maps to the output size
         # This takes into account the extreme cases where one dimension is a few pixels short

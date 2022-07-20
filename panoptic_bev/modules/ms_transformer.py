@@ -11,7 +11,7 @@ class MultiScaleTransformerVF(nn.Module):
     """
 
     def __init__(self, in_ch, tfm_ch, out_ch, extrinsics=None, bev_params=None, H_in=None, W_in=None, W_out=None,
-                 Z_out=None, tfm_scales=None, use_init_theta=None, norm_act=ABN):
+                 Z_out=None, tfm_scales=None, use_init_theta=None, norm_act=ABN, initializer_generator=None):
         super(MultiScaleTransformerVF, self).__init__()
 
         self.transformer_list = nn.ModuleList()
@@ -20,11 +20,11 @@ class MultiScaleTransformerVF(nn.Module):
             if use_init_theta:
                 transformer = TransformerVF(in_ch, tfm_ch, out_ch, extrinsics, bev_params,
                                             H_in=H_in, W_in=W_in, Z_out=Z_out, W_out=W_out, img_scale=1/scale,
-                                            norm_act=norm_act)
+                                            norm_act=norm_act, initializer_generator=initializer_generator)
             else:
                 transformer = TransformerVF(in_ch, tfm_ch, out_ch, bev_params=bev_params,
                                             H_in=H_in, W_in=W_in, Z_out=Z_out, W_out=W_out, img_scale=1/scale,
-                                            norm_act=norm_act)
+                                            norm_act=norm_act, initializer_generator=None)
 
             self.transformer_list.append(transformer)
 
@@ -38,7 +38,7 @@ class MultiScaleTransformerVF(nn.Module):
         for idx in range(len(self.transformer_list)):
             self.transformer_list[idx].apply(init_weights)
 
-    def forward(self, ms_feat, intrinsics, extrinsics=None, valid_msk=None):
+    def forward(self, ms_feat, index, extrinsics=None, valid_msk=None):
         # Run the multi-scale features from each camera
         ms_feat_trans = []
         # vf_logits_list = []
@@ -46,7 +46,7 @@ class MultiScaleTransformerVF(nn.Module):
         # f_region_logits_list = []
 
         for idx, (feat, transformer) in enumerate(zip(ms_feat, self.transformer_list)):
-            bev_feat = transformer(feat, intrinsics, extrinsics, valid_msk)
+            bev_feat = transformer(feat, index, extrinsics, valid_msk)
             del feat
 
             ms_feat_trans.append(bev_feat)

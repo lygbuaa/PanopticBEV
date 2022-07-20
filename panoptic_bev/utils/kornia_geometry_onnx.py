@@ -7,7 +7,9 @@ from panoptic_bev.custom.custom_repeat_interleave import custom_repeat_interleav
 from panoptic_bev.custom.custom_inverse import custom_inverse
 from panoptic_bev.custom.custom_grid_sample import custom_grid_sample
 
-g_onnx_fake_ops = True
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
+
 
 @torch.jit.script
 def _torch_inverse_cast(input: torch.Tensor) -> torch.Tensor:
@@ -252,6 +254,8 @@ def warp_perspective(
 
     src_norm_trans_dst_norm = _torch_inverse_cast(dst_norm_trans_src_norm).to(src.device)  # Bx3x3
 
+    # logger.info("[warp_perspective] M: {}, src: {}, dst: {}, src_norm_trans_dst_norm: {}".format(M, src.shape[2:], dsize, src_norm_trans_dst_norm))
+
     # this piece of code substitutes F.affine_grid since it does not support 3x3
     # grid = (create_meshgrid(h_out, w_out, normalized_coordinates=True, device=src.device).to(src.dtype).repeat(B, 1, 1, 1))
     grid = (create_meshgrid(src, dsize, normalized_coordinates=True).repeat(B, 1, 1, 1))
@@ -264,3 +268,25 @@ def warp_perspective(
     # return fake_grid_sample(src, grid)
     return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')
     # return custom_grid_sample(src, grid)
+
+@torch.jit.script
+def warp_perspective_v2(
+    src: torch.Tensor,
+    src_norm_trans_dst_norm: torch.Tensor,
+    dsize: torch.Tensor,
+) -> torch.Tensor:
+
+    B, _, H, W = src.size()
+    # h_out, w_out = dsize[0], dsize[1]
+
+    # this piece of code substitutes F.affine_grid since it does not support 3x3
+    # grid = (create_meshgrid(h_out, w_out, normalized_coordinates=True, device=src.device).to(src.dtype).repeat(B, 1, 1, 1))
+    grid = (create_meshgrid(src, dsize, normalized_coordinates=True).repeat(B, 1, 1, 1))
+
+    grid = transform_points(src_norm_trans_dst_norm[:, None, None], grid)
+
+    # if padding_mode == "fill":
+    #     return _fill_and_warp(src, grid, align_corners=align_corners, mode=mode, fill_value=fill_value)
+
+    # return fake_grid_sample(src, grid)
+    return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')

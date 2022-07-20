@@ -181,15 +181,15 @@ class PanopticBevNetTs(nn.Module):
 
             # Transform from the front view to the BEV and upsample the height dimension
             if g_toggle_transformer_jit:
-                ms_bev_tmp = self.transformer_jit(ms_feat, intrin, extrin, msk)
+                ms_bev_tmp = self.transformer_jit(ms_feat, idx, extrin, msk)
             else:
-                ms_bev_tmp = self.transformer(ms_feat, intrin, extrin, msk)
+                ms_bev_tmp = self.transformer(ms_feat, idx, extrin, msk)
             # transformer_ts = torch.jit.trace(self.transformer, (ms_feat, intrin, extrin, msk), check_trace=True)
             # torch.jit.save(transformer_ts, self.transformer_jit_path)
             # sys.exit(0)
 
-            # torch.onnx.export(self.transformer, (ms_feat, intrin, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=False, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
-            # sys.exit(0)
+            torch.onnx.export(self.transformer, (ms_feat, idx, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=False, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
+            sys.exit(0)
 
 
             # if ms_bev == None:

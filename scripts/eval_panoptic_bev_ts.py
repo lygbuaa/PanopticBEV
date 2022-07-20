@@ -43,6 +43,7 @@ from panoptic_bev.utils.BevVisualizer import BevVisualizer
 from panoptic_bev.utils.ValidMask import ValidMask
 from panoptic_bev.utils.Nuscenes_tools import BEVTransformV2, BEVNuScenesDatasetV2
 from panoptic_bev.utils.fuse_conv_bn import FuseConvBn
+from panoptic_bev.utils.make_initializers import InitializerGenerator
 from panoptic_bev.utils import plogging
 logger = plogging.get_logger()
 # from thop import profile
@@ -154,7 +155,7 @@ def make_dataloader_v2(args, config, rank, world_size):
                                           pin_memory=True,
                                           drop_last=False,
                                           num_workers=1)
-    return test_dl
+    return test_dl, datasetv2
 
 
 def make_dataloader(args, config, rank, world_size):
@@ -201,7 +202,7 @@ def make_dataloader(args, config, rank, world_size):
     return test_dl
 
 
-def make_model(args, config, num_thing, num_stuff):
+def make_model(args, config, num_thing, num_stuff, init_generator):
     base_config = config["base"]
     fpn_config = config["fpn"]
     transformer_config = config['transformer']
@@ -251,7 +252,8 @@ def make_model(args, config, num_thing, num_stuff):
                                               W_out=dl_config.getstruct('bev_crop')[0] * dl_config.getfloat('scale'),
                                               tfm_scales=tfm_scales,
                                               use_init_theta=transformer_config['use_init_theta'],
-                                              norm_act=norm_act_static)
+                                              norm_act=norm_act_static,
+                                              initializer_generator=init_generator)
 
     vf_loss = None
     region_supervision_loss = None
@@ -740,14 +742,17 @@ def main(args):
     else:
         summary = None
 
+    datasetv2 = None
     # Create dataloaders
     if g_run_multi_view:
-        test_dataloader = make_dataloader_v2(args, config, rank, world_size)
+        test_dataloader, datasetv2 = make_dataloader_v2(args, config, rank, world_size)
     else:
         test_dataloader = make_dataloader(args, config, rank, world_size)
 
+    init_generator = InitializerGenerator(datasetv2)
+
     # Create model
-    model = make_model(args, config, test_dataloader.dataset.num_thing, test_dataloader.dataset.num_stuff)
+    model = make_model(args, config, test_dataloader.dataset.num_thing, test_dataloader.dataset.num_stuff, init_generator)
     # model.load_trained_params()
 
     # Freeze modules based on the argument inputs
