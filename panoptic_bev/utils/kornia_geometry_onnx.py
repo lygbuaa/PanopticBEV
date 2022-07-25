@@ -226,10 +226,10 @@ def transform_points(trans_01: torch.Tensor, points_1: torch.Tensor) -> torch.Te
     points_1_h = convert_points_to_homogeneous(points_1)  # BxNxD+1
     # transform coordinates
     points_0_h = torch.bmm(points_1_h, trans_01.permute(0, 2, 1))
-    points_0_h = torch.squeeze(points_0_h, dim=-1)
+    # this squeeze is useless, remove to avoid Squeeze_340: reshape changes volume. Reshaping [112,192,3] to [112,192]
+    # points_0_h = torch.squeeze(points_0_h, dim=-1)
     # to euclidean
     points_0 = convert_points_from_homogeneous(points_0_h)  # BxNxD
-    # print("transform_points: shape_inp: {}, points_0: {}".format(shape_inp, points_0.shape))
     # reshape to the input shape, keep shape_inp unchanged, to avoid squence ops, anyway shape_inp is unchanged at all!
     assert shape_inp[-2] == points_0.shape[-2]
     assert shape_inp[-1] == points_0.shape[-1]
@@ -288,5 +288,5 @@ def warp_perspective_v2(
     # if padding_mode == "fill":
     #     return _fill_and_warp(src, grid, align_corners=align_corners, mode=mode, fill_value=fill_value)
 
-    # return fake_grid_sample(src, grid)
+    # return fake_grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')
     return F.grid_sample(src, grid, align_corners=True, mode='bilinear', padding_mode='zeros')

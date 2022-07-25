@@ -81,13 +81,13 @@ class VerticalTransformer(nn.Module):
 
         # Unwarp the vertical features using the known camera intrinsics
         v_feat = self.warper(v_feat, intrinsics)
-        v_region_logits = self.warper(v_region_logits, intrinsics)
+        # v_region_logits = self.warper(v_region_logits, intrinsics)
 
         # Flip the features to align it for future merge with the flat features
         v_feat = torch.flip(v_feat, dims=[3])
-        v_region_logits = torch.flip(v_region_logits, dims=[3])
+        # v_region_logits = torch.flip(v_region_logits, dims=[3])
 
-        return v_feat, v_region_logits
+        return v_feat #, v_region_logits
 
 
 class ErrorCorrectionModule(nn.Module):
@@ -284,7 +284,7 @@ class Perspective2OrthographicWarper(nn.Module):
         # Resample 3D feature map
         grid_coords = torch.stack([ucoords, zcoords], -1).clamp(-1.1, 1.1)
 
-        # return fake_grid_sample(features, grid_coords)
+        # return fake_grid_sample(features, grid_coords, align_corners=False)
         return F.grid_sample(features, grid_coords, align_corners=False)
         # return custom_grid_sample(features, grid_coords)
 
@@ -356,7 +356,7 @@ class TransformerVF(nn.Module):
         del v_att, f_att
 
         # Perform the transformations on vertical and flat regions of the image plane feature map
-        feat_v, _ = self.v_transform(feat_v, index, intrinsics=None, extrinsics=None)
+        feat_v = self.v_transform(feat_v, index, intrinsics=None, extrinsics=None)
         feat_f = self.f_transform(feat_f, index, intrinsics=None, extrinsics=None)
 
         # Resize the feature maps to the output size
@@ -416,7 +416,7 @@ def feat_affine(feat, angle, tx, ty):
     # grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
     grid = custom_affine_grid(theta.unsqueeze(0), feat, align_corners=False).to(feat.device)
 
-    # return fake_grid_sample(feat, grid)
+    # return fake_grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
     return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False).to(feat.device)
     # return custom_grid_sample(feat, grid)
 

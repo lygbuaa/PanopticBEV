@@ -3,6 +3,9 @@
 
 import numpy as np
 import torch, torchvision
+import torch.nn.functional as F
+from panoptic_bev.utils import plogging
+logger = plogging.get_logger()
 
 def fake_target_level(boxes:torch.Tensor):
     N, _ = boxes.shape
@@ -87,10 +90,12 @@ def fake_rot90(input:torch.Tensor, k:int, dims:list):
     fake_output = torch.rand(N, C, Hout, Wout, dtype=torch.float, device=input.device)
     return fake_output
 
-def fake_grid_sample(input:torch.Tensor, grid:torch.Tensor):
+def fake_grid_sample(input:torch.Tensor, grid:torch.Tensor, align_corners=False, mode='bilinear', padding_mode='zeros'):
     N, C, Hin, Win = input.shape
     _, Hout, Wout, _ = grid.shape
-    fake_output = torch.rand(N, C, Hout, Wout, dtype=torch.float, device=input.device)
+    # fake_output = torch.rand(N, C, Hout, Wout, dtype=torch.float, device=input.device)
+    fake_output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
+    # logger.info("[fake_grid_sample] input: {}, grid: {}, output: {}".format(input.shape, grid.shape, fake_output.shape))
     return fake_output
 
 def fake_linalg_inv(input:torch.Tensor):

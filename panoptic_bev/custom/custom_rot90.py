@@ -17,15 +17,22 @@ def custom_rot90_once(input:torch.Tensor, dims:List[int]):
 @torch.jit.script
 def custom_rot90(input:torch.Tensor, k:int, dims:List[int]):
     assert k > 0, 'k < 0 not considered!'
-    output = input.new_zeros(size=input.shape)
-    for idx in range(k):
-        output = custom_rot90_once(input, dims)
-        input = output
-    return output
+    assert k < 3, 'only k=1, k=2 supported!'
+    if k == 1:
+        return custom_rot90_once(input, dims)
+    else:
+        tmp = custom_rot90_once(input, dims)
+        return custom_rot90_once(tmp, dims)
+        
+    # output = input.new_zeros(size=input.shape)
+    # for idx in range(k):
+    #     output = custom_rot90_once(input, dims)
+    #     input = output
+    # return output
 
 def test():
     x = torch.rand(size=[1, 2, 3, 4], dtype=torch.float)
-    k = 3
+    k = 2
     dims = [2, 1]
     # x = torch.rand(size=[3, 4], dtype=torch.float)
     print("original x: {}\n{}".format(x.shape, x))
