@@ -338,8 +338,11 @@ class TransformerVF(nn.Module):
         # Placeholder to prevent ABNSync from crashing on backward()
         self.dummy = nn.Conv2d(out_ch, out_ch, 1, padding=0, bias=False)
 
+        self.valid_mask_list = initializer_generator.generate_valid_mask(z_out=self.Z_out, w_out=self.W_out)
+        self.affine_grid_list = initializer_generator.generate_affine_grid(z_out=self.Z_out, w_out=self.W_out, bev_resolution=self.BEV_RESOLUTION)
 
-    def forward(self, feat, index, extrinsics=None, valid_msk=None):
+
+    def forward(self, feat, index):
         feat = self.ch_mapper_in(feat)
 
         # Compute the vertical-flat attention mask
@@ -379,47 +382,34 @@ class TransformerVF(nn.Module):
         # f_region_logits = torch.rot90(f_region_logits, k=1, dims=[2, 3])
 
         # make sure it's eval process, not training
-        # if valid_msk is not None:
-        #filter with valid_msk, maybe optional
-        # logger.debug("feat_merged: {}".format(feat_merged.shape))
-        N, C, H, W = feat_merged.shape
-        msk_t = valid_msk.unsqueeze(0).unsqueeze(0)
-        msk_t = F.interpolate(msk_t, (H, W), mode="nearest")
+        # unfortunately, this line lead to onnx-tensorrt error: "Reshape_540: IShuffleLayer applied to shape tensor must have 0 or 1 reshape dimensions: dimensions were [-1,2]" 
+        # N, C, H, W = feat_merged.shape
+        msk_t = self.valid_mask_list[index].to(feat_merged.device)
         feat_merged = torch.mul(feat_merged, msk_t)
         # double bev size, padding on last dim, left_side
-        feat_merged = F.pad(feat_merged, (W, 0), mode="constant", value=0)
+        feat_merged = F.pad(feat_merged, (self.Z_out, 0), mode="constant", value=0)
 
-        # feature affine
-        # if extrinsics is not None:
-        ccw_angle = extrinsics[1][0]
-        # if keep bev output as [896, 768]
-        # tx = -1.0 - extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out
-        # ty = 0.0 + extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
-        # if double bev output to [896, 768*2]
-        tx = -1 * extrinsics[0][0]/self.BEV_RESOLUTION/self.Z_out/2
-        ty = extrinsics[0][1]/self.BEV_RESOLUTION/self.W_out
-        feat_merged = feat_affine(feat_merged, angle=ccw_angle, tx=tx, ty=ty)
-        # v_region_logits & f_region_logits are useless in prediction
-        # v_region_logits = self.feat_affine(v_region_logits, angle=0.0, tx=0, ty=0)
-        # f_region_logits = self.feat_affine(f_region_logits, angle=0.0, tx=0, ty=0)
-        # else:
-        #     feat_merged = self.feat_affine(feat_merged, angle=0.0, tx=0.0, ty=-1.0)
+        grid = self.affine_grid_list[index].to(feat_merged.device)
+        feat_merged = F.grid_sample(feat_merged, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+        return feat_merged
 
-        return feat_merged #, vf_logits, v_region_logits, f_region_logits
-
+# deprecated
 # @torch.jit.script
 def feat_affine(feat, angle, tx, ty):
     # angle = angle*math.pi/180.0
     # angle = torch.deg2rad(angle)
     angle = fake_deg2rad(angle)
+    N, C, H, W = feat.shape
     theta = torch.stack([torch.stack([torch.cos(angle), torch.sin(-angle), tx]),torch.stack([torch.sin(angle), torch.cos(angle), ty])], dim=0)
     # grid = F.affine_grid(theta.unsqueeze(0), feat.size(), align_corners=False).to(feat.device)
-    grid = custom_affine_grid(theta.unsqueeze(0), feat, align_corners=False).to(feat.device)
+    grid = custom_affine_grid(theta.unsqueeze(0), N=N, H=H, W=W, align_corners=False).to(feat.device)
+    # logger.info("feat: {}, affine grid: {}".format(feat.shape, grid.shape))
 
     # return fake_grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
     return F.grid_sample(feat, grid, mode='bilinear', padding_mode='zeros', align_corners=False).to(feat.device)
     # return custom_grid_sample(feat, grid)
 
+# deprecated
 def g_create_theta_ipm(intrinsics, extrinsics, px_per_metre, img_scale, out_img_size_reverse, fshape=0):
     # self.theta_ipm = torch.tensor([[[-2.1252e-02, -3.8398e-01,  2.5564e+01],
     #                                 [ 1.8623e-09, -6.6520e-01,  4.3911e+01],

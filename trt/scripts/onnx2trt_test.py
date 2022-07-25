@@ -100,7 +100,7 @@ class Onnx2TRT(object):
         # except Exception as e:
         #     logger.error("onnx check model error: {}".format(e))
 
-    def modify_onnx(self, onnx_model_file):
+    def modify_onnx(self, onnx_model_file, new_path):
         graph = gs.import_onnx(onnx.load(onnx_model_file))
         assert(graph is not None)
         counter = 0
@@ -136,7 +136,6 @@ class Onnx2TRT(object):
                 + np.array([m_type], dtype=np.int32).tobytes('C')
                 node.attrs = {'name':'GridSampler', 'version':'1', 'namespace':"", 'data':buffer}
                 node.op = 'TRT_PluginV2'
-        new_path = onnx_model_file + ".modified"
         onnx.save(gs.export_onnx(graph), new_path)
 
     def simplify_onnx_model(self, model_path):
@@ -430,13 +429,14 @@ class Onnx2TRT(object):
 
     def test_transformer(self, model_path, trt_path, only_build_engine=True):
         model = onnx.load(model_path)
+        # logger.info('onnx model graph is:\n{}'.format(model.graph))
         try:
             onnx.checker.check_model(model)
-            logger.info(onnx.helper.printable_graph(model.graph))
+            # logger.info(onnx.helper.printable_graph(model.graph))
             # logger.info('onnx model graph is:\n{}'.format(model.graph))
         except Exception as e:
             logger.error("onnx check model error: {}".format(e))
-            return False
+            # return False
         if only_build_engine:
             self.create_network(onnx_path=model_path)
             self.create_engine(engine_path=trt_path, precision="fp16")
@@ -484,8 +484,9 @@ if __name__ == "__main__":
     encoder_onnx_path = "../../onnx/body_encoder_folded.onnx"
     encoder_trt_path = "../body_encoder_int8.trt"
 
-    transformer_onnx_path = "../../onnx/transformer_op13.onnx"
-    transformer_onnx_inferred_path = "../../onnx/transformer_op13.onnx.inferred"
+    # transformer_onnx_path = "../../onnx/transformer_op13_fold.onnx"
+    transformer_onnx_path = "../../onnx/vit_op13_folded.onnx"
+    transformer_onnx_modified_path = "../../onnx/vit_op13_final.onnx"
     transformer_trt_path = "../transformer_fp16.trt"
 
     roi_onnx_path = "../../onnx/roi_algo_op13.onnx"
@@ -510,7 +511,7 @@ if __name__ == "__main__":
     # onnxtrt.test_rpn_neck(rpn_neck_onnx_path, rpn_neck_trt_path)
     # onnxtrt.test_po_fusion(po_fusion_onnx_path, po_fusion_trt_path)
     # onnxtrt.test_demo(demo_onnx_path, demo_trt_path, only_build_engine=False).
-    # onnxtrt.test_transformer(transformer_onnx_path, transformer_trt_path)
-    onnxtrt.onnx_shape_infer(transformer_onnx_path)
-    # onnxtrt.modify_onnx(transformer_onnx_inferred_path)
+
+    # onnxtrt.modify_onnx(transformer_onnx_path, transformer_onnx_modified_path)
+    onnxtrt.test_transformer(transformer_onnx_modified_path, transformer_trt_path)
 

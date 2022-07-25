@@ -564,9 +564,9 @@ def test(model, dataloader, **varargs):
             inputs = (sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
             # imgs = torch.rand(size=(1,6,3,1024,1920), dtype=torch.float, device=sample["img"].device)
             if g_run_model_jit:
-                results = model_jit(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+                results = model_jit(sample["img"])
             else:
-                results = model(sample["img"], sample["calib"], sample["extrinsics"], sample["valid_msk"])
+                results = model(sample["img"])
             # break
 
             # model_ts = torch.jit.trace(model, inputs, check_trace=True, strict=True)

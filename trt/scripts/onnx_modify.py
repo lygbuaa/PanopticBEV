@@ -172,12 +172,6 @@ def modify_transformer_step1(input_onnx_path, output_onnx_path):
     model = modify_opset_version(model, new_version=13)
     save_onnx_model(model, output_onnx_path)
 
-def modify_transformer_step2(input_onnx_path, output_onnx_path):
-    model = load_onnx_model(input_onnx_path)
-    model = fill_op_value_info(model, op_type="GridSample", value_info_table=g_grid_sample_table, initializer2tensor=True)
-    model = modify_opset_version(model, new_version=13)
-    save_onnx_model(model, output_onnx_path)
-
 if __name__ == "__main__":
     plogging.init("./", "onnx_modify")
     logger = plogging.get_logger()
@@ -187,9 +181,9 @@ if __name__ == "__main__":
     # output_onnx_path = "../../onnx/vit_op16.onnx"
     output_onnx_path = "../../onnx/vit_op13_folded.onnx"
 
-    # modify_transformer_step1(input_onnx_path, output_onnx_path)
-    onnx_model = onnx.load("../../onnx/transformer_op13.onnx")
-    logger.info('onnx model graph is:\n{}'.format(onnx_model))
+    modify_transformer_step1(input_onnx_path, output_onnx_path)
+    # onnx_model = onnx.load("../../onnx/transformer_op13.onnx")
+    # logger.info('onnx model graph is:\n{}'.format(onnx_model))
 
     # model_op13 = load_onnx_model(input_onnx_path)
     # model_op13 = fill_op_value_info(model_op13, op_type="GridSample", value_info_table=g_grid_sample_table)

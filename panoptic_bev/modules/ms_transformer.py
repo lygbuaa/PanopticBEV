@@ -38,7 +38,7 @@ class MultiScaleTransformerVF(nn.Module):
         for idx in range(len(self.transformer_list)):
             self.transformer_list[idx].apply(init_weights)
 
-    def forward(self, ms_feat, index, extrinsics=None, valid_msk=None):
+    def forward(self, ms_feat, index):
         # Run the multi-scale features from each camera
         ms_feat_trans = []
         # vf_logits_list = []
@@ -46,7 +46,7 @@ class MultiScaleTransformerVF(nn.Module):
         # f_region_logits_list = []
 
         for idx, (feat, transformer) in enumerate(zip(ms_feat, self.transformer_list)):
-            bev_feat = transformer(feat, index, extrinsics, valid_msk)
+            bev_feat = transformer(feat, index)
             del feat
 
             ms_feat_trans.append(bev_feat)

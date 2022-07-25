@@ -137,7 +137,7 @@ class PanopticBevNetTs(nn.Module):
     def load_trained_params(self):
         self.rpn_algo.set_head(self.rpn_head)
 
-    def forward(self, img, calib=None, extrinsics=None, valid_msk=None):
+    def forward(self, img):
         
         # logger.info("img PackedSequence __len__(): {}, extrinsics len: {}, valid_msk len: {}".format(img.__len__(), len(extrinsics), len(valid_msk)))
             # logger.debug("panoptic_bev input, img: {},  cat:{}, iscrowd: {}, bbx: {}, do_loss: {}, do_prediction: {}".format(img, bev_msk, front_msk, weights_msk, cat, iscrowd, bbx, do_loss, do_prediction))
@@ -156,10 +156,10 @@ class PanopticBevNetTs(nn.Module):
         b, n, c, h, w = img.shape
         for idx in range(n):
             image = img[:, idx] #[1, 3, 448, 768]
-            intrin = calib[:, idx] #[1, 3, 3]
-            extrin = extrinsics[0, idx] #[2, 3]
-            msk = valid_msk[0, idx] #[896, 768]
-            logger.debug("process camera-{}, img: {}, intrinsics: {}, extrinsics: {}, msk: {}".format(idx, image.shape, intrin.shape, extrin, msk.shape))
+            # intrin = calib[:, idx] #[1, 3, 3]
+            # extrin = extrinsics[0, idx] #[2, 3]
+            # msk = valid_msk[0, idx] #[896, 768]
+            logger.debug("process camera-{}, img: {}".format(idx, image.shape))
             # Get the image features
             if g_toggle_body_jit:
                 ms_feat = self.body_jit(image)
@@ -181,15 +181,15 @@ class PanopticBevNetTs(nn.Module):
 
             # Transform from the front view to the BEV and upsample the height dimension
             if g_toggle_transformer_jit:
-                ms_bev_tmp = self.transformer_jit(ms_feat, idx, extrin, msk)
+                ms_bev_tmp = self.transformer_jit(ms_feat, idx)
             else:
-                ms_bev_tmp = self.transformer(ms_feat, idx, extrin, msk)
+                ms_bev_tmp = self.transformer(ms_feat, idx)
             # transformer_ts = torch.jit.trace(self.transformer, (ms_feat, intrin, extrin, msk), check_trace=True)
             # torch.jit.save(transformer_ts, self.transformer_jit_path)
             # sys.exit(0)
 
-            torch.onnx.export(self.transformer, (ms_feat, idx, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=False, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
-            sys.exit(0)
+            # torch.onnx.export(self.transformer, (ms_feat, idx, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
+            # sys.exit(0)
 
 
             # if ms_bev == None:
