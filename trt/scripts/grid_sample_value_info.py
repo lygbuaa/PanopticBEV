@@ -95,7 +95,7 @@ g_grid_sample_table = {
 
 # refresh this table after onnx model re-export
 g_grid_sample_table = {
-    "754": {
+    "19239": {
         "elem_type": 1,
         "shape": [
             1,
@@ -104,7 +104,7 @@ g_grid_sample_table = {
             192
         ]
     },
-    "852": {
+    "19343": {
         "elem_type": 1,
         "shape": [
             1,
@@ -113,7 +113,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "853": {
+    "19344": {
         "elem_type": 1,
         "shape": [
             1,
@@ -122,7 +122,7 @@ g_grid_sample_table = {
             225
         ]
     },
-    "865": {
+    "19356": {
         "elem_type": 1,
         "shape": [
             1,
@@ -131,7 +131,7 @@ g_grid_sample_table = {
             192
         ]
     },
-    "996": {
+    "19503": {
         "elem_type": 1,
         "shape": [
             1,
@@ -140,7 +140,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "997": {
+    "19504": {
         "elem_type": 1,
         "shape": [
             1,
@@ -149,7 +149,7 @@ g_grid_sample_table = {
             224
         ]
     },
-    "1028": {
+    "19535": {
         "elem_type": 1,
         "shape": [
             1,
@@ -158,7 +158,7 @@ g_grid_sample_table = {
             224
         ]
     },
-    "1175": {
+    "19682": {
         "elem_type": 1,
         "shape": [
             1,
@@ -167,7 +167,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "1176": {
+    "19683": {
         "elem_type": 1,
         "shape": [
             1,
@@ -176,7 +176,7 @@ g_grid_sample_table = {
             192
         ]
     },
-    "1189": {
+    "19696": {
         "elem_type": 1,
         "shape": [
             1,
@@ -185,7 +185,7 @@ g_grid_sample_table = {
             192
         ]
     },
-    "1293": {
+    "19800": {
         "elem_type": 1,
         "shape": [
             1,
@@ -194,7 +194,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "1294": {
+    "19801": {
         "elem_type": 1,
         "shape": [
             1,
@@ -203,34 +203,7 @@ g_grid_sample_table = {
             225
         ]
     },
-    "1390": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            224,
-            384
-        ]
-    },
-    "1391": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            224,
-            384,
-            2
-        ]
-    },
-    "1392": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            224,
-            384
-        ]
-    },
-    "1457": {
+    "19943": {
         "elem_type": 1,
         "shape": [
             1,
@@ -239,7 +212,7 @@ g_grid_sample_table = {
             96
         ]
     },
-    "1555": {
+    "20047": {
         "elem_type": 1,
         "shape": [
             1,
@@ -248,7 +221,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "1556": {
+    "20048": {
         "elem_type": 1,
         "shape": [
             1,
@@ -257,7 +230,7 @@ g_grid_sample_table = {
             113
         ]
     },
-    "1568": {
+    "20060": {
         "elem_type": 1,
         "shape": [
             1,
@@ -266,7 +239,7 @@ g_grid_sample_table = {
             96
         ]
     },
-    "1699": {
+    "20217": {
         "elem_type": 1,
         "shape": [
             1,
@@ -275,7 +248,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "1700": {
+    "20218": {
         "elem_type": 1,
         "shape": [
             1,
@@ -284,7 +257,7 @@ g_grid_sample_table = {
             112
         ]
     },
-    "1731": {
+    "20249": {
         "elem_type": 1,
         "shape": [
             1,
@@ -293,7 +266,7 @@ g_grid_sample_table = {
             112
         ]
     },
-    "1878": {
+    "20396": {
         "elem_type": 1,
         "shape": [
             1,
@@ -302,7 +275,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "1879": {
+    "20397": {
         "elem_type": 1,
         "shape": [
             1,
@@ -311,7 +284,7 @@ g_grid_sample_table = {
             96
         ]
     },
-    "1892": {
+    "20410": {
         "elem_type": 1,
         "shape": [
             1,
@@ -320,7 +293,7 @@ g_grid_sample_table = {
             96
         ]
     },
-    "1996": {
+    "20514": {
         "elem_type": 1,
         "shape": [
             1,
@@ -329,7 +302,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "1997": {
+    "20515": {
         "elem_type": 1,
         "shape": [
             1,
@@ -338,34 +311,7 @@ g_grid_sample_table = {
             113
         ]
     },
-    "2093": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            112,
-            192
-        ]
-    },
-    "2094": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            112,
-            192,
-            2
-        ]
-    },
-    "2095": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            112,
-            192
-        ]
-    },
-    "2160": {
+    "20657": {
         "elem_type": 1,
         "shape": [
             1,
@@ -374,7 +320,7 @@ g_grid_sample_table = {
             48
         ]
     },
-    "2258": {
+    "20761": {
         "elem_type": 1,
         "shape": [
             1,
@@ -383,7 +329,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "2259": {
+    "20762": {
         "elem_type": 1,
         "shape": [
             1,
@@ -392,7 +338,7 @@ g_grid_sample_table = {
             57
         ]
     },
-    "2271": {
+    "20774": {
         "elem_type": 1,
         "shape": [
             1,
@@ -401,7 +347,7 @@ g_grid_sample_table = {
             48
         ]
     },
-    "2402": {
+    "20921": {
         "elem_type": 1,
         "shape": [
             1,
@@ -410,7 +356,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "2403": {
+    "20922": {
         "elem_type": 1,
         "shape": [
             1,
@@ -419,7 +365,7 @@ g_grid_sample_table = {
             56
         ]
     },
-    "2434": {
+    "20953": {
         "elem_type": 1,
         "shape": [
             1,
@@ -428,7 +374,7 @@ g_grid_sample_table = {
             56
         ]
     },
-    "2581": {
+    "21100": {
         "elem_type": 1,
         "shape": [
             1,
@@ -437,7 +383,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "2582": {
+    "21101": {
         "elem_type": 1,
         "shape": [
             1,
@@ -446,7 +392,7 @@ g_grid_sample_table = {
             48
         ]
     },
-    "2595": {
+    "21114": {
         "elem_type": 1,
         "shape": [
             1,
@@ -455,7 +401,7 @@ g_grid_sample_table = {
             48
         ]
     },
-    "2699": {
+    "21218": {
         "elem_type": 1,
         "shape": [
             1,
@@ -464,7 +410,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "2700": {
+    "21219": {
         "elem_type": 1,
         "shape": [
             1,
@@ -473,34 +419,7 @@ g_grid_sample_table = {
             57
         ]
     },
-    "2796": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            56,
-            96
-        ]
-    },
-    "2797": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            56,
-            96,
-            2
-        ]
-    },
-    "2798": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            56,
-            96
-        ]
-    },
-    "2863": {
+    "21361": {
         "elem_type": 1,
         "shape": [
             1,
@@ -509,7 +428,7 @@ g_grid_sample_table = {
             24
         ]
     },
-    "2961": {
+    "21465": {
         "elem_type": 1,
         "shape": [
             1,
@@ -518,7 +437,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "2962": {
+    "21466": {
         "elem_type": 1,
         "shape": [
             1,
@@ -527,7 +446,7 @@ g_grid_sample_table = {
             29
         ]
     },
-    "2974": {
+    "21478": {
         "elem_type": 1,
         "shape": [
             1,
@@ -536,7 +455,7 @@ g_grid_sample_table = {
             24
         ]
     },
-    "3105": {
+    "21635": {
         "elem_type": 1,
         "shape": [
             1,
@@ -545,7 +464,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "3106": {
+    "21636": {
         "elem_type": 1,
         "shape": [
             1,
@@ -554,7 +473,7 @@ g_grid_sample_table = {
             28
         ]
     },
-    "3137": {
+    "21667": {
         "elem_type": 1,
         "shape": [
             1,
@@ -563,7 +482,7 @@ g_grid_sample_table = {
             28
         ]
     },
-    "3284": {
+    "21814": {
         "elem_type": 1,
         "shape": [
             1,
@@ -572,7 +491,7 @@ g_grid_sample_table = {
             2
         ]
     },
-    "3285": {
+    "21815": {
         "elem_type": 1,
         "shape": [
             1,
@@ -581,7 +500,7 @@ g_grid_sample_table = {
             24
         ]
     },
-    "3298": {
+    "21828": {
         "elem_type": 1,
         "shape": [
             1,
@@ -590,7 +509,7 @@ g_grid_sample_table = {
             24
         ]
     },
-    "3402": {
+    "21932": {
         "elem_type": 1,
         "shape": [
             1,
@@ -599,44 +518,16 @@ g_grid_sample_table = {
             2
         ]
     },
-    "3403": {
+    "21933": {
         "elem_type": 1,
         "shape": [
             1,
             128,
             24,
             29
-        ]
-    },
-    "3499": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            28,
-            48
-        ]
-    },
-    "3500": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            28,
-            48,
-            2
-        ]
-    },
-    "3501": {
-        "elem_type": 1,
-        "shape": [
-            1,
-            256,
-            28,
-            48
         ]
     }
 }
-
 
 def print_table(table):
     logger.info("table: {}".format(json.dumps(table, sort_keys=False, indent=4)))
@@ -658,12 +549,14 @@ def get_value_with_counter(op_counter, tensor_counter):
 
 def refresh_table(onnx_model, op_type="GridSample"):
     new_grid_sample_table = {}
+    OP_EACH_CAM = 20
+    cam_counter = 0
     op_counter = 0
     for node in onnx_model.graph.node:
         # logger.info("pick graph node: {}".format(node))
         tensor_counter = 0
         if node.op_type == op_type:
-            logger.info("[{}] find {}: {}".format(op_counter, op_type, node.name))
+            logger.info("[{}-{}] find {}: {}".format(cam_counter, op_counter, op_type, node.name))
             for tensor_name in node.input:
                 pre_key, pre_val = get_value_with_counter(op_counter, tensor_counter)
                 logger.info("[{}-{}] tensor_{} pre key: {}, pre val: {}".format(op_counter, tensor_counter, tensor_name, pre_key, pre_val))
@@ -684,6 +577,13 @@ def refresh_table(onnx_model, op_type="GridSample"):
                         logger.info("[{}-{}] tensor_{}: has value_info {}".format(op_counter, tensor_counter, tensor_name, value_info))
                 tensor_counter += 1
             op_counter += 1
+            #skip the fifth op
+            if (op_counter+1)%5 == 0:
+                op_counter += 1
+
+            if op_counter >= OP_EACH_CAM:
+                op_counter = 0
+                cam_counter += 1
     print_table(new_grid_sample_table)
 
 
@@ -692,7 +592,8 @@ if __name__ == "__main__":
     logger = plogging.get_logger()
     # print_table()
 
-    onnx_model_path = "../../onnx/transformer_op13_folded.onnx"
+    #"../../onnx/transformer_op13_folded.onnx"
+    onnx_model_path = "../../onnx/backbone_lite_op13_folded.onnx" 
     onnx_model = onnx.load(onnx_model_path)
     refresh_table(onnx_model)
 

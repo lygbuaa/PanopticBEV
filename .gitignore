@@ -106,4 +106,9 @@ venv.bak/
 
 # other
 .idea/
-.log
+*.log
+*.trt
+*.onnx
+*.jit
+*.pt
+experiments/*

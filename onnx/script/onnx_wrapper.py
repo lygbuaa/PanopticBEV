@@ -10,8 +10,7 @@ import onnx
 import onnxruntime as ort
 import onnxsim
 from panoptic_bev.utils import plogging
-# plogging.init("./", "onnx_wrapper")
-logger = plogging.get_logger()
+global logger
 
 class OnnxWrapper(object):
     def __init__(self):
@@ -82,16 +81,28 @@ class OnnxWrapper(object):
     def run(self, input_tensor_list):
         input_np_list = []
         device = torch.device('cuda:0')
-        for idx, input_tensor in enumerate(input_tensor_list):
-            device = input_tensor.device
-            input_np = input_tensor.cpu().numpy()
-            logger.debug("input-[{}]: {}".format(idx, input_np.shape))
-            input_np_list.append(input_np)
-
+        for idx, input in enumerate(input_tensor_list):
+            # logger.debug("input-[{}]: {}".format(idx, input))
+            if isinstance(input, torch.Tensor):
+                input_np = input.cpu().numpy()
+                logger.debug("input-[{}] shape: {}".format(idx, input_np.shape))
+                input_np_list.append(input_np)
+            # list of torch.Tensor
+            elif isinstance(input, list):
+                for i, item in enumerate(input):
+                    item_i_np = item.cpu().numpy()
+                    logger.debug("input-[{}-{}] shape: {}".format(idx, i, item_i_np.shape))
+                    input_np_list.append(item_i_np)
+            elif isinstance(input, int):
+                # input_np = np.int64(input)
+                input_np = np.array(input).astype(np.int64)
+                logger.debug("input-[{}]: {}".format(idx, input_np))
+                input_np_list.append(input_np)
+        # logger.info("input_np_list: {}".format(input_np_list))
         output_np_list = self.run_onnx_model(self.ortss, input_np_list)
         output_tensor_list = []
         for idx, output_np in enumerate(output_np_list):
-            logger.debug("make tensor {} from {}".format(idx, output_np.shape))
+            logger.debug("make tensor {} from {}".format(idx, output_np))
             output_tensor = torch.tensor(output_np, device=device)
             output_tensor_list.append(output_tensor)
         return output_tensor_list
@@ -227,6 +238,9 @@ class OnnxWrapper(object):
 
 
 if __name__ == "__main__":
+    plogging.init("./", "onnx_wrapper")
+    logger = plogging.get_logger()
+    
     resnet50_path = "./resnet50-v1-12/resnet50-v1-12.onnx"
     encoder_path = "../body_encoder_op13.onnx"
     encoder_sim_path = "../body_encoder_op13_sim.onnx"

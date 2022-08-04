@@ -188,7 +188,7 @@ class PanopticBevNetTs(nn.Module):
             # torch.jit.save(transformer_ts, self.transformer_jit_path)
             # sys.exit(0)
 
-            # torch.onnx.export(self.transformer, (ms_feat, idx, extrin, msk), self.transformer_onnx_path, opset_version=13, verbose=True, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
+            # torch.onnx.export(self.transformer, (ms_feat, idx), self.transformer_onnx_path, opset_version=13, verbose=True, custom_opsets={"custom_domain": 1}, do_constant_folding=True)
             # sys.exit(0)
 
 

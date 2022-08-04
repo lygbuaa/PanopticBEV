@@ -3,16 +3,16 @@
 
 import os, sys, time
 import numpy as np
-import onnx
+import onnx, torch
 from onnx import helper, shape_inference
 import onnxsim
 import onnx_graphsurgeon as gs
 import tensorrt as trt
-from utils.common import allocate_buffers, do_inference_v2
-from utils.efficientdet_build_engine import EngineCalibrator
-from utils.image_batcher import ImageBatcher
+# sys.path.append("/home/hugoliu/github/PanopticBEV/trt/script/utils")
+from trt.scripts.utils.common import allocate_buffers, do_inference_v2
+from trt.scripts.utils.efficientdet_build_engine import EngineCalibrator
+from trt.scripts.utils.image_batcher import ImageBatcher
 from panoptic_bev.utils import plogging
-plogging.init("./", "onnx2trt_test")
 logger = plogging.get_logger()
 
 class Onnx2TRT(object):
@@ -63,7 +63,6 @@ class Onnx2TRT(object):
         except Exception as e:
             logger.error("onnx check model error: {}".format(e))
 
-        return
         model.opset_import[0].version = 16
         counter = 0
         for node in model.graph.node:
@@ -172,8 +171,8 @@ class Onnx2TRT(object):
         inputs = [self.network.get_input(i) for i in range(self.network.num_inputs)]
         outputs = [self.network.get_output(i) for i in range(self.network.num_outputs)]
 
+        self.batch_size = batch_size
         for input in inputs:
-            self.batch_size = input.shape[0]
             logger.info("Input '{}' with shape {} and dtype {}".format(input.name, input.shape, input.dtype))
         for output in outputs:
             logger.info("Output '{}' with shape {} and dtype {}".format(output.name, output.shape, output.dtype))
@@ -185,6 +184,7 @@ class Onnx2TRT(object):
         inputs = [self.network.get_input(i) for i in range(self.network.num_inputs)]
         self.config.int8_calibrator = EngineCalibrator(calib_cache)
         if calib_cache is None or not os.path.exists(calib_cache):
+            logger.info("make calib.cache from {}".format(calib_input))
             calib_shape = [calib_batch_size] + list(inputs[0].shape[1:])
             calib_dtype = trt.nptype(inputs[0].dtype)
             self.config.int8_calibrator.set_image_batcher(
@@ -199,16 +199,26 @@ class Onnx2TRT(object):
                 return None
             else:
                 self.config.set_flag(trt.BuilderFlag.FP16)
+                # enable the sparsity feature of Ampere Architecture
+                self.config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
+        elif precision == "tf32":
+                self.config.set_flag(trt.BuilderFlag.TF32)
+                # enable the sparsity feature of Ampere Architecture
+                self.config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
         elif precision == "int8":
             if not self.builder.platform_has_fast_int8:
                 logger.warning("INT8 is not supported natively on this platform/device")
                 return None
             else:
-                if self.builder.platform_has_fast_fp16:
-                    # Also enable fp16, as some layers may be even more efficient in fp16 than int8
+                # if self.builder.platform_has_fast_fp16:
+                # Also enable fp16, as some layers may be even more efficient in fp16 than int8
                     self.config.set_flag(trt.BuilderFlag.FP16)
-                else:
+                #     # enable the sparsity feature of Ampere Architecture
+                #     self.config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
+                # else:
                     self.config.set_flag(trt.BuilderFlag.INT8)
+                    # enable the sparsity feature of Ampere Architecture
+                    self.config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
                     # using nuscenes-mini images for calibration
                     self.make_calibrator(calib_input="/home/hugoliu/github/dataset/nuscenes/mini/samples/CAM_FRONT")
 
@@ -235,7 +245,7 @@ class Onnx2TRT(object):
         # inspector only avaliable since TRT-8.4
         inspector = self.engine.create_engine_inspector()
         inspector.execution_context = self.context
-        logger.info(inspector.get_engine_information(trt.LayerInformationFormat.JSON))
+        # logger.info("engine inspector: {}".format(inspector.get_engine_information(trt.LayerInformationFormat.JSON)))
         return self.engine
 
     def run_engine(self, inputs_np):
@@ -282,7 +292,7 @@ class Onnx2TRT(object):
         18482 [dtype=float32, shape=(1, 160, 14, 24)],
         18695 [dtype=float32, shape=(1, 160, 7, 12)]}
     '''
-    def test_encoder(self, model_path, trt_path, only_build_engine=False):
+    def test_encoder(self, model_path, trt_path, precision="fp16", only_build_engine=True):
         model = onnx.load(model_path)
         try:
             onnx.checker.check_model(model)
@@ -293,7 +303,7 @@ class Onnx2TRT(object):
             return False
         if only_build_engine:
             self.create_network(onnx_path=model_path)
-            self.create_engine(engine_path=trt_path, precision="fp16")
+            self.create_engine(engine_path=trt_path, precision=precision)
             self.save_engine(engine_path=trt_path)
             self.destruct()
             return True
@@ -301,9 +311,9 @@ class Onnx2TRT(object):
             image = np.random.rand(1, 3, 448, 768).astype(np.float32)
             self.load_engine(trt_path)
             results = self.run_engine([image])
-            # for feat in results:
-            #     logger.info("{} output: {}".format(trt_path, feat.shape))
-            # self.benchmark(trt_path, [image])
+            for feat in results:
+                logger.info("{} output: {}".format(trt_path, feat.shape))
+            self.benchmark(trt_path, [image])
             # delete context & engine to avoid segment fault in the end
             self.destruct()
             return True
@@ -348,56 +358,6 @@ class Onnx2TRT(object):
             self.destruct()
             return True
 
-    def test_rpn_neck(self, model_path, trt_path, only_build_engine=True):
-        model = onnx.load(model_path)
-        try:
-            onnx.checker.check_model(model)
-            logger.info(onnx.helper.printable_graph(model.graph))
-            # logger.info('onnx model graph is:\n{}'.format(model.graph))
-        except Exception as e:
-            logger.error("onnx check model error: {}".format(e))
-            return False
-        if only_build_engine:
-            self.create_network(onnx_path=model_path)
-            self.create_engine(engine_path=trt_path, precision="fp16")
-            self.save_engine(engine_path=trt_path)
-            self.destruct()
-            return True
-        else:
-            self.load_engine(trt_path)
-            # results = self.run_engine([ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
-            # for feat in results:
-            #     logger.info("{} output: {}".format(trt_path, feat.shape))
-            # self.benchmark(trt_path, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
-            # delete context & engine to avoid segment fault in the end
-            self.destruct()
-            return True
-
-    def test_po_fusion(self, model_path, trt_path, only_build_engine=True):
-        model = onnx.load(model_path)
-        try:
-            onnx.checker.check_model(model)
-            logger.info(onnx.helper.printable_graph(model.graph))
-            # logger.info('onnx model graph is:\n{}'.format(model.graph))
-        except Exception as e:
-            logger.error("onnx check model error: {}".format(e))
-            return False
-        if only_build_engine:
-            self.create_network(onnx_path=model_path)
-            self.create_engine(engine_path=trt_path, precision="fp16")
-            self.save_engine(engine_path=trt_path)
-            self.destruct()
-            return True
-        else:
-            self.load_engine(trt_path)
-            # results = self.run_engine([ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
-            # for feat in results:
-            #     logger.info("{} output: {}".format(trt_path, feat.shape))
-            # self.benchmark(trt_path, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
-            # delete context & engine to avoid segment fault in the end
-            self.destruct()
-            return True
-
     def test_demo(self, model_path, trt_path, only_build_engine=True):
         model = onnx.load(model_path)
         try:
@@ -415,19 +375,18 @@ class Onnx2TRT(object):
             return True
         else:
             self.load_engine(trt_path)
-            logits = np.random.rand(10, 4, 28, 28).astype(np.float32)
-            indices = np.random.rand(10).astype(np.int64)
-            results = self.run_engine([logits, indices])
-            logger.info("{} results: {}".format(trt_path, len(results)))
-            for feat in results:
-                tmp = feat.reshape(-1, 4, 28, 28)
-                logger.info("{} output: {}, reshaped: {}".format(trt_path, feat.shape, tmp.shape))
+            for idx in range(10):
+                input = np.int32(idx)
+                results = self.run_engine([input])
+                logger.info("{} results: {}".format(trt_path, len(results)))
+                for feat in results:
+                    logger.info("{} output: {}".format(trt_path, feat))
             # self.benchmark(trt_path, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
             # delete context & engine to avoid segment fault in the end
             self.destruct()
             return True
 
-    def test_transformer(self, model_path, trt_path, only_build_engine=True):
+    def test_transformer(self, model_path, trt_path, precision="tf32", only_build_engine=True):
         model = onnx.load(model_path)
         # logger.info('onnx model graph is:\n{}'.format(model.graph))
         try:
@@ -439,79 +398,154 @@ class Onnx2TRT(object):
             # return False
         if only_build_engine:
             self.create_network(onnx_path=model_path)
-            self.create_engine(engine_path=trt_path, precision="fp16")
+            self.create_engine(engine_path=trt_path, precision=precision)
             self.save_engine(engine_path=trt_path)
             self.destruct()
             return True
         else:
             self.load_engine(trt_path)
-            # results = self.run_engine([ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
-            # for feat in results:
-            #     logger.info("{} output: {}".format(trt_path, feat.shape))
-            # self.benchmark(trt_path, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
+            feat_0 = np.random.rand(1, 160, 112, 192).astype(np.float32)
+            feat_1 = np.random.rand(1, 160, 56, 96).astype(np.float32)
+            feat_2 = np.random.rand(1, 160, 28, 48).astype(np.float32)
+            feat_3 = np.random.rand(1, 160, 14, 24).astype(np.float32)
+            idx = np.int32(0)
+
+            results = self.run_engine([feat_0, feat_1, feat_2, feat_3, idx])
+            for feat in results:
+                logger.info("{} output: {}".format(trt_path, feat.shape))
+            self.benchmark(trt_path, [feat_0, feat_1, feat_2, feat_3, idx])
             # delete context & engine to avoid segment fault in the end
             self.destruct()
             return True
 
-    def test_roi_head(self, model_path, trt_path, only_build_engine=True):
+    def test_backbone(self, model_path, trt_path, precision="fp16", only_build_engine=True):
         model = onnx.load(model_path)
+        # logger.info('onnx model graph is:\n{}'.format(model.graph))
         try:
             onnx.checker.check_model(model)
-            logger.info(onnx.helper.printable_graph(model.graph))
+            # logger.info(onnx.helper.printable_graph(model.graph))
             # logger.info('onnx model graph is:\n{}'.format(model.graph))
         except Exception as e:
             logger.error("onnx check model error: {}".format(e))
-            return False
+            # return False
         if only_build_engine:
             self.create_network(onnx_path=model_path)
-            self.create_engine(engine_path=trt_path, precision="fp16")
+            self.create_engine(engine_path=trt_path, precision=precision)
             self.save_engine(engine_path=trt_path)
             self.destruct()
             return True
         else:
             self.load_engine(trt_path)
-            # results = self.run_engine([ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
-            # for feat in results:
-            #     logger.info("{} output: {}".format(trt_path, feat.shape))
-            # self.benchmark(trt_path, [ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3])
+            img = np.random.rand(1, 3, 448, 768).astype(np.float32)
+            # ms_bev_0 = np.random.rand(1, 256, 224, 384).astype(np.float32)
+            # ms_bev_1 = np.random.rand(1, 256, 112, 192).astype(np.float32)
+            # ms_bev_2 = np.random.rand(1, 256, 56, 96).astype(np.float32)
+            # ms_bev_3 = np.random.rand(1, 256, 28, 48).astype(np.float32)
+            idx = np.int32(0)
+
+            results = self.run_engine([img, idx])
+            for feat in results:
+                logger.info("{} output: {}".format(trt_path, feat.shape))
+            self.benchmark(trt_path, [img, idx])
             # delete context & engine to avoid segment fault in the end
             self.destruct()
             return True
 
+class TrtWrapper(object):
+    def __init__(self, trt_engine_path):
+        self.onnxtrt = Onnx2TRT(verbose=True)
+        self.engine = self.onnxtrt.load_engine(trt_engine_path)
+
+    # run onnx with torch.Tensors
+    def run(self, input_tensor_list, output_tensor_shape, output_device=torch.device('cuda:0')):
+        input_np_list = []
+        for idx, input in enumerate(input_tensor_list):
+            if isinstance(input, torch.Tensor):
+                input_np = input.cpu().numpy()
+                # logger.debug("input-[{}] shape: {}".format(idx, input_np.shape))
+                input_np_list.append(input_np)
+            # list of torch.Tensor
+            elif isinstance(input, list):
+                for i, item in enumerate(input):
+                    item_i_np = item.cpu().numpy()
+                    # logger.debug("input-[{}-{}] shape: {}".format(idx, i, item_i_np.shape))
+                    input_np_list.append(item_i_np)
+            elif isinstance(input, int):
+                input_np = np.int32(input)
+                # logger.debug("input-[{}]: {}".format(idx, input_np))
+                input_np_list.append(input_np)
+
+        output_np_list = self.onnxtrt.run_engine(input_np_list)
+        output_tensor_list = []
+        for idx, output_np in enumerate(output_np_list):
+            output_tensor = torch.tensor(output_np, device=output_device)
+            output_tensor = output_tensor.reshape(output_tensor_shape[idx])
+            # logger.debug("make tensor [{}] {} from numpy {}".format(idx, output_tensor.shape, output_np.shape))
+            output_tensor_list.append(output_tensor)
+        return output_tensor_list
+
+def test_backbone():
+    backbone_trt_path = "../backbone_fp16.trt"
+    trt_wrapper = TrtWrapper(backbone_trt_path)
+    img = torch.rand([1, 3, 448, 768], dtype=torch.float)
+    #[ms_bev_0, ms_bev_1, ms_bev_2, ms_bev_3]
+    # ms_bev_0 = torch.rand([1, 256, 224, 384], dtype=torch.float)
+    # ms_bev_1 = torch.rand([1, 256, 112, 192], dtype=torch.float)
+    # ms_bev_2 = torch.rand([1, 256, 56, 96], dtype=torch.float)
+    # ms_bev_3 = torch.rand([1, 256, 28, 48], dtype=torch.float)
+    idx = 0
+    input_list = [img, idx]
+    output_list = [[1, 256, 224, 384], [1, 256, 112, 192], [1, 256, 56, 96], [1, 256, 28, 48]]
+    trt_wrapper.run(input_list, output_list)
+
+def test_encoder():
+    encoder_trt_path = "../encoder_fp16.trt"
+    trt_wrapper = TrtWrapper(encoder_trt_path)
+    img = torch.rand([1, 3, 448, 768], dtype=torch.float)
+    input_list = [img]
+    output_list = [[1, 160, 112, 192], [1, 160, 56, 96], [1, 160, 28, 48], [1, 160, 14, 24], [1, 160, 7, 12]]
+    trt_wrapper.run(input_list, output_list)
+
+def test_transformer():
+    transformer_trt_path = "../transformer_lite_tf32.trt"
+    trt_wrapper = TrtWrapper(transformer_trt_path)
+    feat_0 = torch.rand([1, 160, 112, 192], dtype=torch.float)
+    feat_1 = torch.rand([1, 160, 56, 96], dtype=torch.float)
+    feat_2 = torch.rand([1, 160, 28, 48], dtype=torch.float)
+    feat_3 = torch.rand([1, 160, 14, 24], dtype=torch.float)
+    idx = 0
+    input_list = [[feat_0, feat_1, feat_2, feat_3], idx]
+    # output_list = [[1, 256, 224, 384], [1, 256, 112, 192], [1, 256, 56, 96], [1, 256, 28, 48]]
+    output_list = [[1, 256, 224, 192], [1, 256, 112, 96], [1, 256, 56, 48], [1, 256, 28, 24]]
+    trt_wrapper.run(input_list, output_list)
+
 if __name__ == "__main__":
+    plogging.init("./", "onnx2trt_test")
+
     resnet50_path = "../resnet50-v1-12/resnet50-v1-12.onnx"
     #run "polygraphy surgeon sanitize model.onnx --fold-constants --output model_folded.onnx" first
     encoder_onnx_path = "../../onnx/body_encoder_folded.onnx"
-    encoder_trt_path = "../body_encoder_int8.trt"
+    encoder_trt_path = "../encoder_int8.trt"
 
-    # transformer_onnx_path = "../../onnx/transformer_op13_fold.onnx"
-    transformer_onnx_path = "../../onnx/vit_op13_folded.onnx"
-    transformer_onnx_modified_path = "../../onnx/vit_op13_final.onnx"
-    transformer_trt_path = "../transformer_fp16.trt"
+    transformer_onnx_path = "../../onnx/transformer_op13_lite_shape.onnx"
+    # transformer_onnx_path = "../../onnx/vit_op13_folded.onnx"
+    transformer_onnx_modified_path = "../../onnx/transformer_op13_lite_final.onnx"
+    transformer_trt_path = "../transformer_lite_fp16.trt"
 
-    roi_onnx_path = "../../onnx/roi_algo_op13.onnx"
-    roi_trt_path = "../roi_algo_fp16.trt"
+    backbone_onnx_path = "../../onnx/backbone_lite_op13_shape.onnx"
+    backbone_onnx_final_path = "../../onnx/backbone_lite_op13_final.onnx"
+    backbone_trt_path = "../backbone_lite_fp16.trt"
 
-    sem_head_onnx_path = "../../onnx/sem_algo_fold.onnx"
-    sem_head_trt_path = "../sem_algo_fp16.trt"
+    demo_onnx_path = "./demo/trt_demo.onnx"
+    demo_trt_path = "./demo/trt_demo.trt"
 
-    rpn_neck_onnx_path = "../../onnx/rpn_algo_op13.onnx"
-    # rpn_neck_onnx_path = "../../onnx/rpn_algo_fold.onnx"
-    rpn_neck_trt_path = "../rpn_algo_fp16.trt"
+    # test_transformer()
 
-    po_fusion_onnx_path = "../../onnx/po_fusion_op13.onnx"
-    po_fusion_trt_path = "../po_fusion_fp16.trt"
+    onnxtrt = Onnx2TRT(verbose=False)
+    onnxtrt.test_encoder(encoder_onnx_path, encoder_trt_path, precision="int8", only_build_engine=True)
+    # onnxtrt.test_demo(demo_onnx_path, demo_trt_path, only_build_engine=False)
 
-    demo_onnx_path = "../custom_grid_sample.onnx"
-    demo_trt_path = "../trt_custom_grid_sample.trt"
-
-    onnxtrt = Onnx2TRT(verbose=True)
-    # onnxtrt.test_encoder(encoder_onnx_path, encoder_trt_path)
-    # onnxtrt.test_sem_head(sem_head_onnx_path, sem_head_trt_path, only_build_engine=False)
-    # onnxtrt.test_rpn_neck(rpn_neck_onnx_path, rpn_neck_trt_path)
-    # onnxtrt.test_po_fusion(po_fusion_onnx_path, po_fusion_trt_path)
-    # onnxtrt.test_demo(demo_onnx_path, demo_trt_path, only_build_engine=False).
-
-    # onnxtrt.modify_onnx(transformer_onnx_path, transformer_onnx_modified_path)
-    onnxtrt.test_transformer(transformer_onnx_modified_path, transformer_trt_path)
-
+    # onnxtrt.modify_onnx(backbone_onnx_path, backbone_onnx_final_path)
+    # onnxtrt.test_backbone(backbone_onnx_final_path, backbone_trt_path, precision="fp16", only_build_engine=True)
+    # polygraphy surgeon sanitize vit_op13_final.onnx --fold-constants --output vit_op13_final.onnx
+    # onnxtrt.test_transformer(transformer_onnx_modified_path, transformer_trt_path, precision="fp16", only_build_engine=True)

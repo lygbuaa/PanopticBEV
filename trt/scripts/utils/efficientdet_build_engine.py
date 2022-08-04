@@ -25,7 +25,7 @@ import tensorrt as trt
 import pycuda.driver as cuda
 import pycuda.autoinit
 sys.path.append("./utils")
-from image_batcher import ImageBatcher
+from trt.scripts.utils.image_batcher import ImageBatcher
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("EngineBuilder").setLevel(logging.INFO)

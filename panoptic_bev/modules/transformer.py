@@ -384,6 +384,18 @@ class TransformerVF(nn.Module):
         # make sure it's eval process, not training
         # unfortunately, this line lead to onnx-tensorrt error: "Reshape_540: IShuffleLayer applied to shape tensor must have 0 or 1 reshape dimensions: dimensions were [-1,2]" 
         # N, C, H, W = feat_merged.shape
+        ''' # goto run_neck
+        msk_t = self.valid_mask_list[index].to(feat_merged.device)
+        feat_merged = torch.mul(feat_merged, msk_t)
+        # double bev size, padding on last dim, left_side
+        feat_merged = F.pad(feat_merged, (self.Z_out, 0), mode="constant", value=0)
+
+        grid = self.affine_grid_list[index].to(feat_merged.device)
+        feat_merged = F.grid_sample(feat_merged, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+        '''
+        return feat_merged
+
+    def run_neck(self, feat_merged, index):
         msk_t = self.valid_mask_list[index].to(feat_merged.device)
         feat_merged = torch.mul(feat_merged, msk_t)
         # double bev size, padding on last dim, left_side

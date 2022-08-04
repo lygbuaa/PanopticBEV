@@ -56,3 +56,11 @@ class MultiScaleTransformerVF(nn.Module):
         del ms_feat
 
         return ms_feat_trans  #, vf_logits_list, v_region_logits_list, f_region_logits_list,
+
+    def run_neck(self, ms_feat_trans, index):
+        ms_feat_final = []
+        for idx, (in_feat, transformer) in enumerate(zip(ms_feat_trans, self.transformer_list)):
+            out_feat = transformer.run_neck(in_feat, index)
+            ms_feat_final.append(out_feat)
+            print("[{}] in_feat: {}, out_feat: {}".format(index, in_feat.shape, out_feat.shape))
+        return ms_feat_final

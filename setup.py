@@ -60,7 +60,9 @@ setuptools.setup(
         "panoptic_bev.utils.nms",
         "panoptic_bev.utils.parallel",
         "panoptic_bev.utils.roi_sampling",
-        "panoptic_bev.custom"
+        "panoptic_bev.custom",
+        "trt.scripts",
+        "export",
     ],
     ext_modules=[
         make_extension("nms", "panoptic_bev.utils"),

@@ -154,11 +154,13 @@ def test_transformer(onnx_model_path):
     ms_feat_1 = np.random.rand(1, 160, 56, 96).astype(np.float32)
     ms_feat_2 = np.random.rand(1, 160, 28, 48).astype(np.float32)
     ms_feat_3 = np.random.rand(1, 160, 14, 24).astype(np.float32)
-    intrin = np.random.rand(1, 3, 3).astype(np.float32)
+    idx = np.random.rand(1).astype(np.int64) # will always get array([0])
+    # intrin = np.random.rand(1, 3, 3).astype(np.float32)
     # extrin = np.zeros((2, 3)).astype(np.float32)
-    extrin = np.random.rand(2, 3).astype(np.float32)
-    msk = np.random.rand(896, 768).astype(np.float32)
-    inputs=[ms_feat_0, ms_feat_1, ms_feat_2, ms_feat_3, intrin, extrin, msk]
+    # extrin = np.random.rand(2, 3).astype(np.float32)
+    # msk = np.random.rand(896, 768).astype(np.float32)
+    inputs=[ms_feat_0, ms_feat_1, ms_feat_2, ms_feat_3, idx]
+    # inputs=[ms_feat_0, ms_feat_1, ms_feat_2, ms_feat_3, intrin, extrin, msk]
     result = run_onnx_model(ortss, inputs)
     for output in result:
         logger.info("output: {}".format(output.shape))
@@ -172,26 +174,34 @@ def modify_transformer_step1(input_onnx_path, output_onnx_path):
     model = modify_opset_version(model, new_version=13)
     save_onnx_model(model, output_onnx_path)
 
+
+# polygraphy surgeon sanitize backbone_op13.onnx --fold-constants --output backbone_op13_folded.onnx
+def modify_backbone(input_onnx_path, output_onnx_path):
+    model = load_onnx_model(input_onnx_path)
+    model = fill_op_value_info(model, op_type="GridSample", value_info_table=g_grid_sample_table, initializer2tensor=True)
+    model = modify_opset_version(model, new_version=16)
+    model = onnx_shape_infer(model)
+    model = modify_opset_version(model, new_version=13)
+    save_onnx_model(model, output_onnx_path)
+# polygraphy surgeon sanitize backbone_op13_shape.onnx --fold-constants --output backbone_op13_folded2.onnx    
+
 if __name__ == "__main__":
     plogging.init("./", "onnx_modify")
     logger = plogging.get_logger()
     print_version()
-    input_onnx_path = "../../onnx/transformer_op13_folded.onnx"
+    input_onnx_path = "../../onnx/backbone_lite_op13_folded2.onnx"
     # input_onnx_path = "../../onnx/vit_op16_folded.onnx"
     # output_onnx_path = "../../onnx/vit_op16.onnx"
-    output_onnx_path = "../../onnx/vit_op13_folded.onnx"
+    output_onnx_path = "../../onnx/backbone_lite_op13_shape.onnx"
 
-    modify_transformer_step1(input_onnx_path, output_onnx_path)
-    # onnx_model = onnx.load("../../onnx/transformer_op13.onnx")
+    # modify_transformer_step1(input_onnx_path, output_onnx_path)
+    modify_backbone(input_onnx_path, output_onnx_path)
+
+    # onnx_model = onnx.load("../../onnx/transformer_op13_lite.onnx")
     # logger.info('onnx model graph is:\n{}'.format(onnx_model))
 
-    # model_op13 = load_onnx_model(input_onnx_path)
-    # model_op13 = fill_op_value_info(model_op13, op_type="GridSample", value_info_table=g_grid_sample_table)
-    # model_op13 = onnx_shape_infer(model_op13)
-    # save_onnx_model(model_op13, output_onnx_path)
+    # model_op13 = load_onnx_model(output_onnx_path)
+    # model_op16 = modify_opset_version(model_op13, new_version=16)
+    # save_onnx_model(model_op16, "../../onnx/transformer_op16_folded.onnx")
 
-    # iterate_op(model_op13)
-
-    # model_op16 = load_onnx_model(output_onnx_path)
-    # ort_load_onnx(transformer_op16_path)
-    # test_transformer(transformer_op13_path)
+    # test_transformer("../../onnx/transformer_op16_folded.onnx")
